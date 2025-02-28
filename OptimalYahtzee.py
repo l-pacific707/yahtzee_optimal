@@ -83,8 +83,11 @@ def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_fi
                 agent.update_target()
         
         #  Decay epsilon AFTER the episode ends, not after every batch update
-        if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600)==0):
-            agent.epsilon *= agent.epsilon_decay  
+        try : 
+            if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600)==0):
+                agent.epsilon *= agent.epsilon_decay  
+        except ZeroDivisionError:
+            pass
         # Print training progress every 'print_interval' episodes.
         if (episode + 1) % print_interval == 0:
             print(f"Episode {episode+1}/{num_episodes} - Reward: {episode_reward:.2f}, Score: {env.scorecard[0:6]}|{env.scorecard[6:]},total : {np.sum(env.scorecard)}, Epsilon: {agent.epsilon:.3f}")
@@ -290,8 +293,8 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
     md_lines.append("---\n")
 
     md_lines.append("## Step-by-Step Decisions\n")
-    md_lines.append("| Step | Dice (One-Hot) | Rerolls | Turn | Valid Actions | Chosen Action | Reward | Cumulative Reward | Done? |\n")
-    md_lines.append("|-|-|-|-|-|-|-|-|-|\n")
+    md_lines.append("| Step | Dice (One-Hot) | Rerolls | Turn | Valid Actions | Chosen Action | Reward | Cumulative Reward | Done? |")
+    md_lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
     # Start the loop
     state = env.get_state()
@@ -311,7 +314,7 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
         dice_str = ", ".join(dice_desc)
 
         # Summarize step in table row
-        line = f"| {steps} | **{dice_str}** | {env.rerolls} | {env.turn} | `{env.scorecard}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
+        line = f"| {steps} | **{dice_str}** | {next_state[30]} | {next_state[31]} | `{next_state[32:43].astype(int)}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
         md_lines.append(line)
 
         state = next_state
@@ -334,15 +337,15 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
 
 
 
-
 if __name__ == "__main__":
 
     # Just a debug check: prints True if GPU is available
     print("CUDA available?", torch.cuda.is_available())
-    print("Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    #print("Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    torch.device("cpu")
 
     # Number of training episodes for this run
-    num_episodes = 2000
+    num_episodes = 10
 
     # 1) Look for an existing trial file in the current directory
     trial = find_latest_trial(num_episodes)

@@ -21,14 +21,14 @@ class YahtzeeEnv(gym.Env):
         self.bonus = False
         self.done = False
         self.bonusRewarded = False
+        self.scored = np.full((12,), False, dtype=np.bool)
 
         # Return initial observation -> do we need this?
         
     def _reroll_under_mask(self, mask: list):
         "Reroll dice result under the bitmask"
         if self.rerolls == 0:
-            print("No reroll remains.")
-            return 0
+            raise ValueError(f"No reroll remains. ")
         else:
             self.rerolls -= 1
             for i in range(len(mask)):
@@ -123,17 +123,15 @@ class YahtzeeEnv(gym.Env):
             score (int, optional) : score for that category
         No return value
         """
-        if score is None:
-            val = self.get_score_for_action(action)
-        else:
-            val = score
-        if self.scorecard[action-31] == 0:
-            self.scorecard[action-31] = val
-            self.rerolls = 3
-            self.turn += 1    
-        else:
-            print("Invalid scoring action. The scorecard field was already written.")
-            print(f"Action : {action}, category : {action-32}, value : {self.scorecard[action-32]}")
+        index = action - 31
+        if self.scored[index]:
+            raise ValueError(f"Already filled in that category : {index}, value : {self.scorecard[index]}")
+        val = score if score is not None else self.get_score_for_action(action)
+        self.scorecard[index] = val
+        self.scored[index] = True
+        self.rerolls = 3
+        self.turn += 1
+
         # check if game is completed
         if self.turn == 12 : #game end
             self.done = True
@@ -155,20 +153,21 @@ class YahtzeeEnv(gym.Env):
                 ])
 
     def get_valid_action(self) -> list:
-        """Return list of valid action, e.g.)[1,4,5,43] action: 0-30(reroll), 31-43(scoring); integer """
-        valid = list(range(43))
+        """Return list of valid action, e.g.)[1,4,5,43] action: 0-30(reroll), 31-42(scoring); integer """
+
         if self.rerolls == 0:
-            for i in range(31):
-                valid.remove(i) # remove reroll options from valid action list
-            for i in range(12):
-                if self.scorecard[i] != 0 :
-                    valid.remove(i+31) # remove already scored categories
+            #only scoring option is available
+            valids = []
+            for i, filled in enumerate(self.scored):
+                if not filled :
+                    valids.append(i+31) 
         else:
             # We have rerolls, and scoring is available as well
-            for i in range(12):
-                if self.scorecard[i] != 0 :
-                    valid.remove(i+31)
-        return valid
+            valids = list(range(0,31))
+            for i, filled in enumerate(self.scored):
+                if not filled :
+                    valids.append(i+31) 
+        return valids
 
     def step(self, action):
         # 1) Apply action (roll dice or choose category, etc.)                     
@@ -183,6 +182,8 @@ class YahtzeeEnv(gym.Env):
             next_state = self.get_state()
             return next_state, reward, self.done, {}
         valid = self.get_valid_action()
+        #print(f"***Valid actions in step function(output of get_valid_function) : {valid}***")
+
         if action not in valid:
             # If an invalid action is selected, penalize and return the same state.
             reward = -15
@@ -193,14 +194,14 @@ class YahtzeeEnv(gym.Env):
         if action < 31: # action : 0-30 reroll, 31-42 immediate scoring
             mask = self.int_to_bitmask(action) # bit mask to reroll dice result
             self._reroll_under_mask(mask)
-            reward = 0 
+            reward = self.get_sum_possible_score() * 0.25 #since this is not actual reward (not finally scored value)
             next_state = self.get_state()
             return next_state, reward, self.done, {}
             
         ## scoring action
         elif action >= 31 and action < 43:
             score = self.get_score_for_action(action)
-            reward = score
+            reward = score * 2.5 
             self._score_action(action,score)
             # if self.bonus and (self.bonusRewarded is False):
             #     reward += 35
@@ -208,7 +209,18 @@ class YahtzeeEnv(gym.Env):
             reward += score/63 # bonus contribution
             next_state = self.get_state()
             return next_state, reward, self.done, {}
-    
+
+    def get_sum_possible_score(self) -> int:
+        valids = self.get_valid_action()
+        ind = 0
+        sum = 0
+        for i in range(len(valids)):
+            if valids[i] < 31 :
+                ind += 1
+        for sAction in valids[i:] :
+            sum += self.get_score_for_action(sAction)
+        return sum
+
     @staticmethod
     def int_to_bitmask(num):
         """Change an integer number to a 5-bit mask corresponding to (num+1) in binary representation.
@@ -227,3 +239,4 @@ class YahtzeeEnv(gym.Env):
         bitmask = list(map(int, format(num+1, '05b')))
 
         return bitmask
+ 
