@@ -50,11 +50,7 @@ class YahtzeeEnv(gym.Env):
     def _reroll_under_mask(self, mask: list):
         "Reroll dice result under the bitmask"
         if self.rerolls == 0:
-<<<<<<< HEAD
             raise ValueError("No reroll remains.")
-=======
-            raise ValueError(f"No reroll remains. ")
->>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
         else:
             self.rerolls -= 1
             for i in range(len(mask)):
@@ -230,7 +226,6 @@ class YahtzeeEnv(gym.Env):
         if 1 <= action <= 31:  # Changed from < 31 to range 1-31
             mask = self.int_to_bitmask(action)
             self._reroll_under_mask(mask)
-<<<<<<< HEAD
             if self.rerolls == 0 :
                 try:
                     # averaging over 12 categories
@@ -239,9 +234,6 @@ class YahtzeeEnv(gym.Env):
                     reward = 0
             else :
                 reward = self.get_expected_reward()
-=======
-            reward = self.get_sum_possible_score() * 0.08  # since this is not actual reward (not finally scored value)
->>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
             next_state = self.get_state()
             return next_state, reward, self.done, {}
 
@@ -267,7 +259,6 @@ class YahtzeeEnv(gym.Env):
                 sum += self.get_score_for_action(sAction)
         return sum
 
-<<<<<<< HEAD
     def get_expected_reward(self) -> float:
         """
         Computes the expected reward for valid scoring actions.
@@ -292,8 +283,6 @@ class YahtzeeEnv(gym.Env):
         return reward / len(valids) if valids else 0  # Prevent division by zero
     
 
-=======
->>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
     @staticmethod
     def int_to_bitmask(num):
         """Change an integer number to a 5-bit mask corresponding to (num+1) in binary representation.
@@ -305,11 +294,7 @@ class YahtzeeEnv(gym.Env):
             input: 21
             return: [1, 0, 1, 1, 0] 
         """
-<<<<<<< HEAD
         if not 1 <= num <= 31:
-=======
-        if not (1 <= num <= 31):
->>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
             raise ValueError("Input number must be between 0(inclusive) and 30 (inclusive).")
 
         # Convert to binary, remove '0b' prefix, and fill with leading zeros to ensure 5 bits
