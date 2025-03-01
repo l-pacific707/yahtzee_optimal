@@ -1,54 +1,76 @@
+import math
 import gymnasium as gym
 import numpy as np
 
 
 class YahtzeeEnv(gym.Env):
+    """
+    Yahtzee Environment for Reinforcement Learning.
+
+    This class implements the Yahtzee game as a reinforcement learning environment.
+    It follows the Gymnasium (formerly OpenAI Gym) interface, providing methods
+    for resetting the environment, taking steps, and observing the current state.
+
+    Attributes:
+        observation_space (gym.spaces.Box): The observation space, representing the state of the game.
+        action_space (gym.spaces.Discrete): The action space, representing the possible actions.
+        dice (np.ndarray): A 2D numpy array (5x6) representing the dice, using one-hot encoding.
+        rerolls (int): The number of rerolls remaining in the current turn.
+        turn (int): The current turn number (0-11).
+        scorecard (np.ndarray): A numpy array of length 12, representing the scores for each category.
+        bonus (bool): Indicates whether the bonus is active.
+        done (bool): Indicates whether the game is over.
+        bonusRewarded (bool): Indicates whether the bonus has been rewarded.
+        scored (np.ndarray): A boolean array of length 12, indicating which categories have been scored.
+        rng (np.random.Generator): A random number generator for dice rolls.
+    """
+
     def __init__(self):
         super(YahtzeeEnv, self).__init__()
         # Define spaces ( )
-        self.observation_space = gym.spaces.Box(low = 0, high = 50, shape = (45,), dtype = np.int32) #((dice_result: 5 * 6 bit for one hot encoding), reroll, turn, [scores: 12], bonus )
-        self.action_space = gym.spaces.Discrete(43)  # e.g., (0-30: reroll with bit mask, 31-42: filling the score)
+        self.observation_space = gym.spaces.Box(low=0, high=50, shape=(45,), dtype=np.int32)  # ((dice_result: 5 * 6 bit for one hot encoding), reroll, turn, [scores: 12], bonus )
+        self.action_space = gym.spaces.Discrete(44)  # 0 : initial roll, 1-31: reroll, 32-43: filling the score)
         self._reset()
         self.rng = np.random.default_rng()
 
     def _reset(self):
         # Reset environment state (dice, categories, etc.)
         # Game states
-        self.dice = np.zeros((5,6), dtype=np.int32) # one hot vectors in array
+        self.dice = np.zeros((5, 6), dtype=np.int32)  # one hot vectors in array
         self.rerolls = 3
         self.turn = 0
         self.scorecard = np.zeros(12, dtype=np.int32)
         self.bonus = False
         self.done = False
         self.bonusRewarded = False
+        self.scored = np.full((12,), False, dtype=np.bool)
 
         # Return initial observation -> do we need this?
-        
+
     def _reroll_under_mask(self, mask: list):
         "Reroll dice result under the bitmask"
         if self.rerolls == 0:
-            print("No reroll remains.")
-            return 0
+            raise ValueError("No reroll remains.")
         else:
             self.rerolls -= 1
             for i in range(len(mask)):
                 if mask[i] == 1:
-                    self.dice[i,:] = np.zeros((1,6),dtype=np.int32) # reset ith die value
-                    j = self.rng.integers(low = 0, high = 5, endpoint=True, dtype = np.int32)
-                    self.dice[i,j] = 1 
-    
+                    self.dice[i, :] = np.zeros((1, 6), dtype=np.int32)  # reset ith die value
+                    j = self.rng.integers(low=0, high=5, endpoint=True, dtype=np.int32)
+                    self.dice[i, j] = 1
+
     def get_score_for_action(self, action) -> int:
         """ self.dice: 2D numpy array (5*6), each row represents one number under one-hot encoding
             action : 31-42 integer number
             Return : score(int) for selected action
         """
-        scoreto = action - 31
-        numbers = [0,0,0,0,0,0] # how many occurences are there for 1,2,...,5,6?
+        scoreto = action - 32  # Changed from 31 to 32
+        numbers = [0, 0, 0, 0, 0, 0]  # how many occurences are there for 1,2,...,5,6?
         meresum = 0
         for i in range(5):
-            if self.dice[i][0] == 1: ## ith die is 1
+            if self.dice[i][0] == 1:  ## ith die is 1
                 numbers[0] += 1
-            elif self.dice[i][1] == 1: ## ith die is 2
+            elif self.dice[i][1] == 1:  ## ith die is 2
                 numbers[1] += 1
             elif self.dice[i][2] == 1:
                 numbers[2] += 1
@@ -61,8 +83,8 @@ class YahtzeeEnv(gym.Env):
             else:
                 continue
         for i in range(5):
-            meresum += numbers[i] * (i+1)
-                
+            meresum += numbers[i] * (i + 1)
+
         if scoreto == 0:  # Ones
             return numbers[0] * 1
         elif scoreto == 1:  # Twos
@@ -81,23 +103,26 @@ class YahtzeeEnv(gym.Env):
             for i in range(5):
                 if numbers[i] >= 4:
                     return meresum
-                else : continue
-            return 0 
+                else:
+                    continue
+            return 0
         elif scoreto == 8:  # Full House: three of one number and two of another
             return meresum if (3 in numbers) and (2 in numbers) else 0
         elif scoreto == 9:  # Little Straight: 1,2,3,4; 2,3,4,5; 3,4,5,6
-            
-            if numbers[0:4] == [1,1,1,1]:
+
+            if numbers[0:4] == [1, 1, 1, 1]:
                 return 15
-            elif numbers[1:5] == [1,1,1,1]:
+            elif numbers[1:5] == [1, 1, 1, 1]:
                 return 15
-            elif numbers[2:] == [1,1,1,1]:
+            elif numbers[2:] == [1, 1, 1, 1]:
                 return 15
-            else : return 0
+            else:
+                return 0
         elif scoreto == 10:  # Big Straight: 2-3-4-5-6; 1,2,3,4,5
-            if (numbers[:5] == [1,1,1,1,1]) or (numbers[1:6]  == [1,1,1,1,1]):
+            if (numbers[:5] == [1, 1, 1, 1, 1]) or (numbers[1:6] == [1, 1, 1, 1, 1]):
                 return 30
-            else: return 0
+            else:
+                return 0
         elif scoreto == 11:  # Yacht: all dice the same
             try:
                 numbers.index(5)
@@ -105,10 +130,10 @@ class YahtzeeEnv(gym.Env):
             except ValueError:
                 return 0
         else:
-            print("Undealt case raised. scoring function must be modified.") 
-            return 0 
-    
-    def _score_action(self,action, score = None):
+            print("Undealt case raised. scoring function must be modified.")
+            return 0
+
+    def _score_action(self, action, score=None):
         """Fill the score in scorecard with selected action. (in-place)
          This function does
          1) fill the score
@@ -116,114 +141,163 @@ class YahtzeeEnv(gym.Env):
          3) turn increases
          4) check game end
          5) check bonus point is possible
- 
+
 
         Args:
-            action (int): 31-42 integer. 
+            action (int): 32-43 integer.
             score (int, optional) : score for that category
         No return value
         """
-        if score is None:
-            val = self.get_score_for_action(action)
-        else:
-            val = score
-        if self.scorecard[action-31] == 0:
-            self.scorecard[action-31] = val
-            self.rerolls = 3
-            self.turn += 1    
-        else:
-            print("Invalid scoring action. The scorecard field was already written.")
-            print(f"Action : {action}, category : {action-32}, value : {self.scorecard[action-32]}")
+        if action < 32 or action > 43:
+            raise ValueError(f"Invalid scoring action: {action}. Action must be between 32 and 43 for scoring.")
+
+        index = action - 32  # Changed from 31 to 32
+        if self.scored[index]:
+            raise ValueError(f"Already filled in that category : {index}, value : {self.scorecard[index]}")
+        val = score if score is not None else self.get_score_for_action(action)
+        self.scorecard[index] = val
+        self.scored[index] = True
+        self.rerolls = 3
+        self.turn += 1
+
         # check if game is completed
-        if self.turn == 12 : #game end
+        if self.turn == 12:  # game end
             self.done = True
         # check the bonus point is possible
         if np.sum(self.scorecard[0:6]) >= 63:
             self.bonus = True
-    
+
     def _initiate_turn(self):
-        if self.rerolls ==3:
-            self._reroll_under_mask([1,1,1,1,1])
-    
+        if self.rerolls == 3:
+            self._reroll_under_mask([1, 1, 1, 1, 1])
+
     def get_state(self) -> np.ndarray:
         return np.concatenate([
-                    self.dice.flatten(),
-                    np.array([self.rerolls]),  # Convert scalar to array
-                    np.array([self.turn]),     # Convert scalar to array
-                    self.scorecard,
-                    np.array([self.bonus], dtype=int)  # Convert boolean to int
-                ])
+            self.dice.flatten(),
+            np.array([self.rerolls]),  # Convert scalar to array
+            np.array([self.turn]),  # Convert scalar to array
+            self.scorecard,
+            np.array([self.bonus], dtype=int)  # Convert boolean to int
+        ])
 
     def get_valid_action(self) -> list:
-        """Return list of valid action, e.g.)[1,4,5,43] action: 0-30(reroll), 31-43(scoring); integer """
-        valid = list(range(43))
-        if self.rerolls == 0:
-            for i in range(31):
-                valid.remove(i) # remove reroll options from valid action list
-            for i in range(12):
-                if self.scorecard[i] != 0 :
-                    valid.remove(i+31) # remove already scored categories
+        """Return list of valid action, e.g.)[1,4,5,43] action: 0(initiate roll), 1-31(reroll), 32-43(scoring); integer """
+
+        if self.rerolls == 3:
+            return [0] #only initial roll
+        elif self.rerolls == 0:
+            # only scoring option is available
+            valids = []
+            for i, filled in enumerate(self.scored):
+                if not filled:
+                    valids.append(i + 32)  # Changed from 31 to 32
+            return valids
         else:
             # We have rerolls, and scoring is available as well
-            for i in range(12):
-                if self.scorecard[i] != 0 :
-                    valid.remove(i+31)
-        return valid
+            valids = list(range(1, 32))  # Changed from 0 to 1
+            for i, filled in enumerate(self.scored):
+                if not filled:
+                    valids.append(i + 32)  # Changed from 31 to 32
+            return valids
 
     def step(self, action):
-        # 1) Apply action (roll dice or choose category, etc.)                     
+        # 1) Apply action (roll dice or choose category, etc.)
         # 2) Calculate reward
         # 3) Determine if episode is done
         # 4) Return the next state, reward, done, and optionally info dict
-        
-        ## turn initiation
-        if self.rerolls == 3:
-            reward = 0
-            self._initiate_turn()
-            next_state = self.get_state()
-            return next_state, reward, self.done, {}
+
         valid = self.get_valid_action()
+        # print(f"***Valid actions in step function(output of get_valid_function) : {valid}***")
+
         if action not in valid:
             # If an invalid action is selected, penalize and return the same state.
             reward = -15
             next_state = self.get_state()
             return next_state, reward, self.done, {}
 
+        ## turn initiation
+        if action == 0:
+            reward = 0
+            self._initiate_turn()
+            next_state = self.get_state()
+            return next_state, reward, self.done, {}
+
         ## reroll action
-        if action < 31: # action : 0-30 reroll, 31-42 immediate scoring
-            mask = self.int_to_bitmask(action) # bit mask to reroll dice result
+        if 1 <= action <= 31:  # Changed from < 31 to range 1-31
+            mask = self.int_to_bitmask(action)
             self._reroll_under_mask(mask)
-            reward = 0 
+            if self.rerolls == 0 :
+                try:
+                    # averaging over 12 categories
+                    reward = self.get_sum_possible_score() / len(valid)
+                except ZeroDivisionError:
+                    reward = 0
+            else :
+                reward = self.get_expected_reward()
             next_state = self.get_state()
             return next_state, reward, self.done, {}
-            
+
         ## scoring action
-        elif action >= 31 and action < 43:
+        elif 32 <= action <= 43:  # Changed to range 32-43
             score = self.get_score_for_action(action)
-            reward = score
-            self._score_action(action,score)
-            # if self.bonus and (self.bonusRewarded is False):
-            #     reward += 35
-            #     self.bonusRewarded = True
-            reward += score/63 # bonus contribution
+            reward = score 
+            self._score_action(action, score)
+            if self.bonus and (self.bonusRewarded is False):
+                reward += 35
+                self.bonusRewarded = True
+            # reward += score / 63  # bonus contribution
             next_state = self.get_state()
             return next_state, reward, self.done, {}
+        else:
+            raise ValueError(f"Invalid action: {action}. Action must be between 0 and 43.")
+
+    def get_sum_possible_score(self) -> int:
+        valids = self.get_valid_action()
+        sum = 0
+        for sAction in valids:
+            if sAction >= 32:
+                sum += self.get_score_for_action(sAction)
+        return sum
+
+    def get_expected_reward(self) -> float:
+        """
+        Computes the expected reward for valid scoring actions.
+        All actions follow the same probability logic.
+        """
+        valids = self.get_valid_action()
+        temp = [32,33,34,35,36,37]
+        valids = [x for x in valids if x in temp]
+        reward = 0
+        def _expected_score(category_value: int) -> float:
+            """Calculates the expected score for any scoring category (ones to sixes)."""
+            count = sum(1 for i in range(5) if self.dice[i][category_value - 1] == 1)  # Count matching dice
+            diffs = 5 - count  # Number of dice that need to change
+            expected_reward = 0
+            for k in range(diffs + 1):  # Include case where no dice change
+                expected_reward += (count + k) * category_value * math.comb(diffs, k) * (1 / (6 ** k)) * ((5 / 6) ** (diffs - k))
+            return expected_reward
+
+        for action in valids:
+            # Convert action number to category value (32→1, 33→2, ..., 37→6)
+            reward += _expected_score(action - 31)
+        return reward / len(valids) if valids else 0  # Prevent division by zero
     
+
     @staticmethod
     def int_to_bitmask(num):
         """Change an integer number to a 5-bit mask corresponding to (num+1) in binary representation.
-        
-        Input: integer number (0-30)
+
+        Input: integer number (1-31)
         Output: list of integers representing a 5-bit mask.
-        
+
         Example:
-            input: 21  
-            return: [1, 0, 1, 1, 0]  (actually 22 in decimal repr.)
+            input: 21
+            return: [1, 0, 1, 1, 0] 
         """
-        if not (0 <= num <= 30):
+        if not 1 <= num <= 31:
             raise ValueError("Input number must be between 0(inclusive) and 30 (inclusive).")
-        
+
         # Convert to binary, remove '0b' prefix, and fill with leading zeros to ensure 5 bits
-        bitmask = list(map(int, format(num+1, '05b')))
+        bitmask = list(map(int, format(num, '05b'))) # change the num+1 to num
 
         return bitmask

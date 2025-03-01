@@ -72,6 +72,8 @@ class DQNAgent:
 
                 # Argmax on GPU; then convert to a Python int.
                 action = int(torch.argmax(masked_q))
+                if action not in valid_actions:
+                    print(f"Invalid actions are selected. valid actions : {valid_actions}, action : {action}")
             
             return action
 

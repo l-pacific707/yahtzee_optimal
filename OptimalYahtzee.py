@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import numpy as np
 import os
 import re
@@ -30,7 +31,7 @@ def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_fi
     # The state dimension is determined from the environment.
     state_dim = env.get_state().shape[0]
     # As defined in YahtzeeEnv, there are 43 discrete actions (1..43).
-    action_dim = 43  
+    action_dim = 44
 
     # 1) Either load an existing agent or create a new one.
     if load_filepath is not None:
@@ -83,8 +84,11 @@ def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_fi
                 agent.update_target()
         
         #  Decay epsilon AFTER the episode ends, not after every batch update
-        if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600)==0):
-            agent.epsilon *= agent.epsilon_decay  
+        try : 
+            if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600)==0):
+                agent.epsilon *= agent.epsilon_decay  
+        except ZeroDivisionError:
+            pass
         # Print training progress every 'print_interval' episodes.
         if (episode + 1) % print_interval == 0:
             print(f"Episode {episode+1}/{num_episodes} - Reward: {episode_reward:.2f}, Score: {env.scorecard[0:6]}|{env.scorecard[6:]},total : {np.sum(env.scorecard)}, Epsilon: {agent.epsilon:.3f}")
@@ -178,6 +182,41 @@ def save_agent(agent, filepath="trained_agent.pth"):
     }, filepath)
     print(f"Agent saved to {filepath}")
 
+def save_model_info(model, optimizer, loss_fn, filename="modelinfo.md"):
+    with open(filename, "w") as file:
+        file.write("# Model Information\n\n")
+        
+        # 모델의 layer 구조
+        file.write("## Model Architecture\n")
+        file.write("```python\n")
+        file.write(str(model) + "\n")
+        file.write("```\n\n")
+        
+        # Optimizer 정보
+        file.write("## Optimizer\n")
+        file.write(f"Optimizer: {optimizer.__class__.__name__}\n")
+        file.write(f"Learning rate: {optimizer.param_groups[0]['lr']}\n")
+        file.write(f"Parameters: {optimizer.param_groups[0]}\n\n")
+        
+        # Loss function 정보
+        file.write("## Loss Function\n")
+        file.write(f"Loss Function: {loss_fn.__class__.__name__}\n\n")
+        
+        # Activation functions 정보 (모델에서 사용하는 activation function 추출)
+        file.write("## Activation Functions\n")
+        activation_functions = []
+        for layer in model.children():
+            if isinstance(layer, nn.ReLU):
+                activation_functions.append("ReLU")
+            elif isinstance(layer, nn.Sigmoid):
+                activation_functions.append("Sigmoid")
+            elif isinstance(layer, nn.Tanh):
+                activation_functions.append("Tanh")
+        
+        if activation_functions:
+            file.write(f"Used activation functions: {', '.join(activation_functions)}\n")
+        else:
+            file.write("No activation function found\n")
 
 def load_agent(filepath, state_dim, action_dim):
     """
@@ -237,50 +276,26 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
     done = False
     steps = 0
     cumulative_reward = 0
-    category = {0 : "reroll 00001",
-                1 : "reroll 00010",
-                2 : "reroll 00011",
-                3 : "reroll 00100",
-                4 : "reroll 00101",
-                5 : "reroll 00110",
-                6 : "reroll 00111",
-                7 : "reroll 01000",
-                8 : "reroll 01001",
-                9 : "reroll 01010",
-                10 : "reroll 01011",
-                11 : "reroll 01100",
-                12 : "reroll 01101",
-                13 : "reroll 01110",
-                14 : "reroll 01111",
-                15 : "reroll 10000",
-                16 : "reroll 10001",
-                17 : "reroll 10010",
-                18 : "reroll 10011",
-                19 : "reroll 10100",
-                20 : "reroll 10101",
-                21 : "reroll 10110",
-                22 : "reroll 10111",
-                23 : "reroll 11000",
-                24 : "reroll 11001",
-                25 : "reroll 11010",
-                26 : "reroll 11011",
-                27 : "reroll 11100",
-                28 : "reroll 11101",
-                29 : "reroll 11110",
-                30 : "reroll 11111",
-                31: "score : ones",
-                32: "score : twos",
-                33: "score : threes",
-                34: "score : fours",
-                35: "score : fives",
-                36: "score : sixes",
-                37 : "score : choices",
-                38: "score : four of a kind",
-                39 : "score : full house",
-                40 : "score : small straight",
-                41 : "score : large straight",
-                42 : "score : yahtzee",
-                }
+    category = {
+    0: "initiate roll",  # 처음 굴리기
+
+    # 주사위를 다시 굴리는 행동
+    1:  "reroll 00001",  2:  "reroll 00010",  3:  "reroll 00011",  4:  "reroll 00100",
+    5:  "reroll 00101",  6:  "reroll 00110",  7:  "reroll 00111",  8:  "reroll 01000",
+    9:  "reroll 01001", 10:  "reroll 01010", 11: "reroll 01011", 12: "reroll 01100",
+    13: "reroll 01101", 14: "reroll 01110", 15: "reroll 01111", 16: "reroll 10000",
+    17: "reroll 10001", 18: "reroll 10010", 19: "reroll 10011", 20: "reroll 10100",
+    21: "reroll 10101", 22: "reroll 10110", 23: "reroll 10111", 24: "reroll 11000",
+    25: "reroll 11001", 26: "reroll 11010", 27: "reroll 11011", 28: "reroll 11100",
+    29: "reroll 11101", 30: "reroll 11110", 31: "reroll 11111",
+
+    # 점수를 기록하는 행동
+    32: "score : ones", 33: "score : twos", 34: "score : threes", 35: "score : fours",
+    36: "score : fives", 37: "score : sixes", 38: "score : choices", 39: "score : four of a kind",
+    40: "score : full house", 41: "score : small straight", 42: "score : large straight",
+    43: "score : yahtzee",
+}
+
 
     # We prepare lines of markdown
     md_lines = []
@@ -290,8 +305,8 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
     md_lines.append("---\n")
 
     md_lines.append("## Step-by-Step Decisions\n")
-    md_lines.append("| Step | Dice (One-Hot) | Rerolls | Turn | Valid Actions | Chosen Action | Reward | Cumulative Reward | Done? |\n")
-    md_lines.append("|-|-|-|-|-|-|-|-|-|\n")
+    md_lines.append("| Step | Dice (One-Hot) | Rerolls | Turn | Valid Actions | Chosen Action | Reward | Cumulative Reward | Done? |")
+    md_lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
     # Start the loop
     state = env.get_state()
@@ -311,7 +326,7 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
         dice_str = ", ".join(dice_desc)
 
         # Summarize step in table row
-        line = f"| {steps} | **{dice_str}** | {env.rerolls} | {env.turn} | `{env.scorecard}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
+        line = f"| {steps} | **{dice_str}** | {next_state[30]} | {next_state[31]} | `{next_state[32:43].astype(int)}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
         md_lines.append(line)
 
         state = next_state
@@ -334,15 +349,15 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
 
 
 
-
 if __name__ == "__main__":
 
     # Just a debug check: prints True if GPU is available
     print("CUDA available?", torch.cuda.is_available())
-    print("Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    #print("Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    torch.device("cpu")
 
     # Number of training episodes for this run
-    num_episodes = 2000
+    num_episodes = 1000
 
     # 1) Look for an existing trial file in the current directory
     trial = find_latest_trial(num_episodes)
@@ -358,7 +373,7 @@ if __name__ == "__main__":
     #    e.g. if trial = 2, we save next as trained_agent_3_{num_episodes}.pth
     save_filepath = f"trained_agent_{trial+1}_{num_episodes}.pth"
 
-    # 3) Train (or continue training) the agent
+    # 3) Train (or continue training) the agent and save the model to save_filepath
     rng = np.random.default_rng()
     trained_agent = train_agent(
         num_episodes=num_episodes,
@@ -373,3 +388,6 @@ if __name__ == "__main__":
     test_score = test_agent(trained_agent, num_test_episodes=100)
     print(f"Final average test reward: {test_score:.2f}")
     play_episode(trained_agent)
+
+    # 5) save the model info in modelinfo.md
+    save_model_info(trained_agent.policy_net.net, trained_agent.optimizer, nn.MSELoss())
