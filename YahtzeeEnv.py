@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import math
 
 
 class YahtzeeEnv(gym.Env):
@@ -28,10 +29,14 @@ class YahtzeeEnv(gym.Env):
     def _reroll_under_mask(self, mask: list):
         "Reroll dice result under the bitmask"
         if self.rerolls == 0:
+<<<<<<< Updated upstream
             raise ValueError(f"No reroll remains. ")
+=======
+            raise ValueError("No reroll remains.")
+>>>>>>> Stashed changes
         else:
             self.rerolls -= 1
-            for i in range(len(mask)):
+            for i , _ in enumerate(mask):
                 if mask[i] == 1:
                     self.dice[i, :] = np.zeros((1, 6), dtype=np.int32)  # reset ith die value
                     j = self.rng.integers(low=0, high=5, endpoint=True, dtype=np.int32)
@@ -204,7 +209,18 @@ class YahtzeeEnv(gym.Env):
         if 1 <= action <= 31:  # Changed from < 31 to range 1-31
             mask = self.int_to_bitmask(action)
             self._reroll_under_mask(mask)
+<<<<<<< Updated upstream
             reward = self.get_sum_possible_score() * 0.08  # since this is not actual reward (not finally scored value)
+=======
+            if self.rerolls == 0 :
+                try:
+                    # averaging over 12 categories
+                    reward = self.get_sum_possible_score() / len(valid)
+                except ZeroDivisionError:
+                    reward = 0
+            else :
+                reward = self.get_expected_reward()
+>>>>>>> Stashed changes
             next_state = self.get_state()
             return next_state, reward, self.done, {}
 
@@ -230,6 +246,33 @@ class YahtzeeEnv(gym.Env):
                 sum += self.get_score_for_action(sAction)
         return sum
 
+<<<<<<< Updated upstream
+=======
+    def get_expected_reward(self) -> float:
+        """
+        Computes the expected reward for valid scoring actions.
+        All actions follow the same probability logic.
+        """
+        valids = self.get_valid_action()
+        temp = [32,33,34,35,36,37]
+        valids = [x for x in valids if x in temp]
+        reward = 0
+        def _expected_score(category_value: int) -> float:
+            """Calculates the expected score for any scoring category (ones to sixes)."""
+            count = sum(1 for i in range(5) if self.dice[i][category_value - 1] == 1)  # Count matching dice
+            diffs = 5 - count  # Number of dice that need to change
+            expected_reward = 0
+            for k in range(diffs + 1):  # Include case where no dice change
+                expected_reward += (count + k) * category_value * math.comb(diffs, k) * (1 / (6 ** k)) * ((5 / 6) ** (diffs - k))
+            return expected_reward
+
+        for action in valids:
+            # Convert action number to category value (32→1, 33→2, ..., 37→6)
+            reward += _expected_score(action - 31)  
+        return reward / len(valids) if valids else 0  # Prevent division by zero
+    
+
+>>>>>>> Stashed changes
     @staticmethod
     def int_to_bitmask(num):
         """Change an integer number to a 5-bit mask corresponding to (num+1) in binary representation.
@@ -241,7 +284,11 @@ class YahtzeeEnv(gym.Env):
             input: 21
             return: [1, 0, 1, 1, 0] 
         """
+<<<<<<< Updated upstream
         if not (1 <= num <= 31):
+=======
+        if not 1 <= num <= 31:
+>>>>>>> Stashed changes
             raise ValueError("Input number must be between 0(inclusive) and 30 (inclusive).")
 
         # Convert to binary, remove '0b' prefix, and fill with leading zeros to ensure 5 bits
