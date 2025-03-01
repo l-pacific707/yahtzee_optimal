@@ -1,9 +1,30 @@
+import math
 import gymnasium as gym
 import numpy as np
-import math
 
 
 class YahtzeeEnv(gym.Env):
+    """
+    Yahtzee Environment for Reinforcement Learning.
+
+    This class implements the Yahtzee game as a reinforcement learning environment.
+    It follows the Gymnasium (formerly OpenAI Gym) interface, providing methods
+    for resetting the environment, taking steps, and observing the current state.
+
+    Attributes:
+        observation_space (gym.spaces.Box): The observation space, representing the state of the game.
+        action_space (gym.spaces.Discrete): The action space, representing the possible actions.
+        dice (np.ndarray): A 2D numpy array (5x6) representing the dice, using one-hot encoding.
+        rerolls (int): The number of rerolls remaining in the current turn.
+        turn (int): The current turn number (0-11).
+        scorecard (np.ndarray): A numpy array of length 12, representing the scores for each category.
+        bonus (bool): Indicates whether the bonus is active.
+        done (bool): Indicates whether the game is over.
+        bonusRewarded (bool): Indicates whether the bonus has been rewarded.
+        scored (np.ndarray): A boolean array of length 12, indicating which categories have been scored.
+        rng (np.random.Generator): A random number generator for dice rolls.
+    """
+
     def __init__(self):
         super(YahtzeeEnv, self).__init__()
         # Define spaces ( )
@@ -29,14 +50,14 @@ class YahtzeeEnv(gym.Env):
     def _reroll_under_mask(self, mask: list):
         "Reroll dice result under the bitmask"
         if self.rerolls == 0:
-<<<<<<< Updated upstream
-            raise ValueError(f"No reroll remains. ")
-=======
+<<<<<<< HEAD
             raise ValueError("No reroll remains.")
->>>>>>> Stashed changes
+=======
+            raise ValueError(f"No reroll remains. ")
+>>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
         else:
             self.rerolls -= 1
-            for i , _ in enumerate(mask):
+            for i in range(len(mask)):
                 if mask[i] == 1:
                     self.dice[i, :] = np.zeros((1, 6), dtype=np.int32)  # reset ith die value
                     j = self.rng.integers(low=0, high=5, endpoint=True, dtype=np.int32)
@@ -209,9 +230,7 @@ class YahtzeeEnv(gym.Env):
         if 1 <= action <= 31:  # Changed from < 31 to range 1-31
             mask = self.int_to_bitmask(action)
             self._reroll_under_mask(mask)
-<<<<<<< Updated upstream
-            reward = self.get_sum_possible_score() * 0.08  # since this is not actual reward (not finally scored value)
-=======
+<<<<<<< HEAD
             if self.rerolls == 0 :
                 try:
                     # averaging over 12 categories
@@ -220,7 +239,9 @@ class YahtzeeEnv(gym.Env):
                     reward = 0
             else :
                 reward = self.get_expected_reward()
->>>>>>> Stashed changes
+=======
+            reward = self.get_sum_possible_score() * 0.08  # since this is not actual reward (not finally scored value)
+>>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
             next_state = self.get_state()
             return next_state, reward, self.done, {}
 
@@ -246,8 +267,7 @@ class YahtzeeEnv(gym.Env):
                 sum += self.get_score_for_action(sAction)
         return sum
 
-<<<<<<< Updated upstream
-=======
+<<<<<<< HEAD
     def get_expected_reward(self) -> float:
         """
         Computes the expected reward for valid scoring actions.
@@ -268,11 +288,12 @@ class YahtzeeEnv(gym.Env):
 
         for action in valids:
             # Convert action number to category value (32→1, 33→2, ..., 37→6)
-            reward += _expected_score(action - 31)  
+            reward += _expected_score(action - 31)
         return reward / len(valids) if valids else 0  # Prevent division by zero
     
 
->>>>>>> Stashed changes
+=======
+>>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
     @staticmethod
     def int_to_bitmask(num):
         """Change an integer number to a 5-bit mask corresponding to (num+1) in binary representation.
@@ -284,11 +305,11 @@ class YahtzeeEnv(gym.Env):
             input: 21
             return: [1, 0, 1, 1, 0] 
         """
-<<<<<<< Updated upstream
-        if not (1 <= num <= 31):
-=======
+<<<<<<< HEAD
         if not 1 <= num <= 31:
->>>>>>> Stashed changes
+=======
+        if not (1 <= num <= 31):
+>>>>>>> parent of 538197c (Update environment definition (YahtzeeEnv.py))
             raise ValueError("Input number must be between 0(inclusive) and 30 (inclusive).")
 
         # Convert to binary, remove '0b' prefix, and fill with leading zeros to ensure 5 bits
