@@ -6,15 +6,13 @@ import torch.optim as optim
 from collections import deque
 
 class DQNet(nn.Module):
-    def __init__(self, state_dim=45, action_dim=43):
+    def __init__(self, state_dim=45, action_dim=44):
         super(DQNet, self).__init__()
         
         self.net = nn.Sequential(
             nn.Linear(state_dim, 256),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256,128),
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, action_dim)
         )
@@ -44,7 +42,7 @@ class DQNAgent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         #self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
-        self.optimizer = optim.RMSprop(self.policy_net.parameters(),lr = lr, alpha = 0.99)
+        self.optimizer = optim.Adam(self.policy_net.parameters(),lr = lr, weight_decay=1e-5)
         self.rng = np.random.default_rng() if rng is None else rng
         
             
@@ -146,9 +144,10 @@ class DQNAgent:
         loss = nn.MSELoss()(current_q, expected_q)
         self.optimizer.zero_grad()
         loss.backward()
+        # gradient clippling applied
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10)
         self.optimizer.step()
-
-
+        return loss
 
 
     def update_target(self):

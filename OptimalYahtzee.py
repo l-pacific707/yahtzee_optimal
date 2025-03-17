@@ -7,9 +7,10 @@ from DeepQNet import DQNet
 from DeepQNet import DQNAgent
 from YahtzeeEnv import YahtzeeEnv
 
+
 def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_filepath=None, lr=1e-3, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.010, epsilon_decay=0.995,
-                 buffer_size=10000, batch_size=64, target_update=100, rng=None):
+                 buffer_size=10000, batch_size=32, target_update=100, rng=None):
     """
     Train the DQN agent on YahtzeeEnv for a specified number of episodes.
     Optionally load an existing agent's parameters from 'load_filepath'
@@ -25,79 +26,70 @@ def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_fi
     Returns:
         DQNAgent: The trained (or further trained) DQN agent.
     """
-
-    # Initialize environment.
     env = YahtzeeEnv()
-    # The state dimension is determined from the environment.
     state_dim = env.get_state().shape[0]
-    # As defined in YahtzeeEnv, there are 43 discrete actions (1..43).
     action_dim = 44
 
-    # 1) Either load an existing agent or create a new one.
     if load_filepath is not None:
-        # We load from a checkpoint file.
         print(f"Loading agent from {load_filepath}...")
         agent = load_agent(load_filepath, state_dim, action_dim)
         agent.epsilon = epsilon_start
     else:
-        # We create a new agent from scratch.
         agent = DQNAgent(state_dim, action_dim, lr=lr, gamma=gamma,
                  epsilon_start=epsilon_start, epsilon_end=epsilon_end, epsilon_decay=epsilon_decay,
                  buffer_size=buffer_size, batch_size=batch_size, target_update=target_update, rng=rng)
-    
-    total_steps = 0  # Counts total steps across episodes (for target_net updates).
+
+    total_steps = 0
+    episode_rewards = []
 
     for episode in range(num_episodes):
-        # Reset the environment for a new episode (a new Yahtzee game).
         env._reset()
         state = env.get_state()
-        
         episode_reward = 0.0
         done = False
-        
+
         while not done:
-            # Retrieve valid actions for the current state.
             valid_actions = env.get_valid_action()
-            
-            # Agent picks an action (epsilon-greedy restricted to valid actions).
             action = agent.select_action(state, valid_actions)
-            
-            # Environment processes the action.
             next_state, reward, done, _ = env.step(action)
             episode_reward += reward
 
-            # If not done, get valid actions for the next state; otherwise empty list.
             next_valid_actions = env.get_valid_action() if not done else []
-            
-            # Store transition in replay memory.
+
             agent.push_memory((state, action, reward, next_state, done, next_valid_actions))
-            
-            # Optimize (update) the policy network using a minibatch from memory.
-            agent.optimize_model()
-            
-            # Move to the next state.
+            loss = agent.optimize_model()
+
             state = next_state
             total_steps += 1
-            
-            # Periodically update the target network with policy_net weights.
+
             if total_steps % agent.target_update == 0:
                 agent.update_target()
-        
-        #  Decay epsilon AFTER the episode ends, not after every batch update
-        try : 
-            if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600)==0):
-                agent.epsilon *= agent.epsilon_decay  
+
+        episode_rewards.append(episode_reward)
+
+        try:
+            if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600) == 0):
+                agent.epsilon *= agent.epsilon_decay
         except ZeroDivisionError:
             pass
-        # Print training progress every 'print_interval' episodes.
-        if (episode + 1) % print_interval == 0:
-            print(f"Episode {episode+1}/{num_episodes} - Reward: {episode_reward:.2f}, Score: {env.scorecard[0:6]}|{env.scorecard[6:]},total : {np.sum(env.scorecard)}, Epsilon: {agent.epsilon:.3f}")
 
-    # After training, optionally save the agent.
+        if (episode + 1) % print_interval == 0:
+            recent_rewards = episode_rewards[-print_interval:]
+            avg_reward = np.mean(recent_rewards)
+
+            with torch.no_grad():
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+                q_values = agent.policy_net(state_tensor).squeeze(0).cpu().numpy()
+                avg_q_value = np.mean(q_values)
+
+            print(f"Episode {episode+1}/{num_episodes} - Reward: {episode_reward:.2f}, Avg Reward: {avg_reward:.2f}, Avg Q-value: {avg_q_value:.2f}, Loss: {loss:.6f},  Score: {env.scorecard[0:6]}|{env.scorecard[6:]},total : {np.sum(env.scorecard)}, Epsilon: {agent.epsilon:.3f}")
+
     if save_filepath is not None:
         save_agent(agent, save_filepath)
 
     return agent
+
+
 
 def test_agent(agent, num_test_episodes=20):
     """
@@ -313,6 +305,7 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
     while not done and steps < 100:  # 12 turns is typical, 100 is a safe upper bound
         valid_actions = env.get_valid_action()
         action = agent.select_action(state, valid_actions)
+        agent.epsilon = 0
         next_state, reward, done, info = env.step(action)
 
         steps += 1
@@ -326,7 +319,7 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
         dice_str = ", ".join(dice_desc)
 
         # Summarize step in table row
-        line = f"| {steps} | **{dice_str}** | {next_state[30]} | {next_state[31]} | `{next_state[32:43].astype(int)}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
+        line = f"| {steps} | **{dice_str}** | {next_state[30]} | {next_state[31]} | `{next_state[32:44].astype(int)}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
         md_lines.append(line)
 
         state = next_state
@@ -379,13 +372,15 @@ if __name__ == "__main__":
         num_episodes=num_episodes,
         print_interval=50,
         load_filepath=load_filepath,      # Might be None if not found
-        save_filepath=save_filepath, lr=5e-5, gamma=0.99,
-                 epsilon_start=1.0 / (trial+2), epsilon_end=0.010, epsilon_decay=0.995,
-                 buffer_size=100000, batch_size=128, target_update=100, rng=rng
+        save_filepath=save_filepath, 
+        lr=1e-4, 
+        gamma=0.99,
+        epsilon_start=1.0, epsilon_end=0.050, epsilon_decay=0.996,
+        buffer_size=100000, batch_size=1024, target_update=200, rng=rng
     )
 
     # 4) Test the agent
-    test_score = test_agent(trained_agent, num_test_episodes=100)
+    test_score = test_agent(trained_agent, num_test_episodes=500)
     print(f"Final average test reward: {test_score:.2f}")
     play_episode(trained_agent)
 
