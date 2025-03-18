@@ -8,9 +8,10 @@ from DeepQNet import DQNAgent
 from YahtzeeEnv import YahtzeeEnv
 
 
-def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_filepath=None, lr=1e-3, gamma=0.99,
+def train_agent(num_episodes=500, print_interval=10, heuristic_start = None, load_filepath=None, save_filepath=None, lr=1e-3, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.010, epsilon_decay=0.995,
-                 buffer_size=10000, batch_size=32, target_update=100, rng=None):
+                 buffer_size=10000, batch_size=32, target_update=100, rng=None,
+                 alpha=0.6, beta_start=0.4, beta_increment=1e-5):
     """
     Train the DQN agent on YahtzeeEnv for a specified number of episodes.
     Optionally load an existing agent's parameters from 'load_filepath'
@@ -37,7 +38,16 @@ def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_fi
     else:
         agent = DQNAgent(state_dim, action_dim, lr=lr, gamma=gamma,
                  epsilon_start=epsilon_start, epsilon_end=epsilon_end, epsilon_decay=epsilon_decay,
-                 buffer_size=buffer_size, batch_size=batch_size, target_update=target_update, rng=rng)
+                 buffer_size=buffer_size, batch_size=batch_size, target_update=target_update, rng=rng,
+                 alpha=alpha, beta_start=beta_start, beta_increment=beta_increment)
+
+    if heuristic_start is not None and load_filepath is None:
+        initialize_q_values(agent, env)
+        play_episode(agent,"initialmodel.md")
+        test_policy(num_test_episodes=100)
+        print("Initializaiton done. Training starts...")
+        test_agent(agent, num_test_episodes=10)
+        save_agent(agent, "heuristic_qvalue.pth")
 
     total_steps = 0
     episode_rewards = []
@@ -90,6 +100,28 @@ def train_agent(num_episodes=500, print_interval=10, load_filepath=None, save_fi
     return agent
 
 
+def initialize_q_values(agent, env):
+    """
+    Heuristic Policy를 이용해 초기 Q-values를 설정
+    """
+    for _ in range(50000):  # 충분한 상태를 샘플링하여 초기 Q값 학습
+        env._reset()
+        state = env.get_state()
+        done = False
+        step = 0
+
+        while not done:
+            action = env.heuristic_policy()
+            next_state, reward, done, _ = env.step(action)
+
+            # Heuristic 기반 Value Function으로 Q-value 초기화
+            target_q_value = reward + agent.gamma * torch.max(agent.policy_net(torch.FloatTensor(next_state)))
+            agent.policy_net(torch.FloatTensor(state))[action] = target_q_value
+
+            state = next_state
+        step += 1
+        if step% 1000 == 0:
+            print(f"Step {step} done.")
 
 def test_agent(agent, num_test_episodes=20):
     """
@@ -157,7 +189,14 @@ def test_agent(agent, num_test_episodes=20):
     print(f"Tested on {num_test_episodes} episodes. Avg reward = {avg_reward:.2f}")
     return avg_reward
 
-
+def test_policy(num_test_episodes=50):
+    rewards = []
+    for i in range(num_test_episodes):
+        reward = play_episode_with_policy()
+        rewards.append(reward)
+    avg_reward = np.mean(rewards)
+    print(f"Average reward for this policy: {avg_reward:.3f}")
+    
 def save_agent(agent, filepath="trained_agent.pth"):
     """
     Save the trained DQN agent's policy network and parameters.
@@ -339,6 +378,86 @@ def play_episode(agent, md_filename="yahtzee_playthrough.md"):
 
     print(f"Playthrough complete. Markdown log written to {md_filename}.")
 
+def play_episode_with_policy(md_filename="yahtzee_playthrough_with_policy.md"):
+    """play episode with policy function
+
+    Args:
+        policy (func, output:int ): policy function whose output is action for given state
+    """
+    env = YahtzeeEnv()
+    env._reset()
+    done = False
+    steps = 0
+    cumulative_reward = 0
+    category = {
+    0: "initiate roll",  # 처음 굴리기
+
+    # 주사위를 다시 굴리는 행동
+    1:  "reroll 00001",  2:  "reroll 00010",  3:  "reroll 00011",  4:  "reroll 00100",
+    5:  "reroll 00101",  6:  "reroll 00110",  7:  "reroll 00111",  8:  "reroll 01000",
+    9:  "reroll 01001", 10:  "reroll 01010", 11: "reroll 01011", 12: "reroll 01100",
+    13: "reroll 01101", 14: "reroll 01110", 15: "reroll 01111", 16: "reroll 10000",
+    17: "reroll 10001", 18: "reroll 10010", 19: "reroll 10011", 20: "reroll 10100",
+    21: "reroll 10101", 22: "reroll 10110", 23: "reroll 10111", 24: "reroll 11000",
+    25: "reroll 11001", 26: "reroll 11010", 27: "reroll 11011", 28: "reroll 11100",
+    29: "reroll 11101", 30: "reroll 11110", 31: "reroll 11111",
+
+    # 점수를 기록하는 행동
+    32: "score : ones", 33: "score : twos", 34: "score : threes", 35: "score : fours",
+    36: "score : fives", 37: "score : sixes", 38: "score : choices", 39: "score : four of a kind",
+    40: "score : full house", 41: "score : small straight", 42: "score : large straight",
+    43: "score : yahtzee",
+}
+
+
+    # We prepare lines of markdown
+    md_lines = []
+    md_lines.append("# Yahtzee Episode Playthrough\n")
+    md_lines.append("**Environment:** Yahtzee\n")
+    md_lines.append("**Agent:** Trained DQN (placeholder)\n")
+    md_lines.append("---\n")
+
+    md_lines.append("## Step-by-Step Decisions\n")
+    md_lines.append("| Step | Dice (One-Hot) | Rerolls | Turn | Valid Actions | Chosen Action | Reward | Cumulative Reward | Done? |")
+    md_lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+
+    # Start the loop
+    state = env.get_state()
+    while not done and steps < 100:  # 12 turns is typical, 100 is a safe upper bound
+        action = env.heuristic_policy()
+        next_state, reward, done, info = env.step(action)
+        steps += 1
+        cumulative_reward += reward
+
+        # Convert dice to a more readable list of faces
+        dice_desc = []
+        for i in range(5):
+            face_idx = np.argmax(env.dice[i])  # which face is "1"
+            dice_desc.append(str(face_idx+1))
+        dice_str = ", ".join(dice_desc)
+
+        # Summarize step in table row
+        line = f"| {steps} | **{dice_str}** | {next_state[30]} | {next_state[31]} | `{next_state[32:44].astype(int)}` | **{category[action]}** | {reward:.2f} | {cumulative_reward:.2f} | {done} |"
+        md_lines.append(line)
+
+        state = next_state
+
+    # Summarize final score
+    final_score = np.sum(env.scorecard)
+    bonus_desc = f"(Bonus Active)" if env.bonus else ""
+    md_lines.append("\n---\n")
+    md_lines.append(f"**Episode finished** after **{steps}** steps.\n\n")
+    md_lines.append(f"**Final Scorecard** = {env.scorecard}  \n")
+    md_lines.append(f"**Sum of Scorecard** = {final_score} {bonus_desc}\n")
+    md_lines.append(f"**Cumulative Reward** = {cumulative_reward:.2f}\n")
+
+    # Write to Markdown file
+    with open(md_filename, "w", encoding="utf-8") as f:
+        f.write("\n".join(md_lines))
+
+    print(f"Playthrough complete. Markdown log written to {md_filename}.")
+    return final_score
+
 
 
 
@@ -350,7 +469,7 @@ if __name__ == "__main__":
     torch.device("cpu")
 
     # Number of training episodes for this run
-    num_episodes = 1000
+    num_episodes = 3000
 
     # 1) Look for an existing trial file in the current directory
     trial = find_latest_trial(num_episodes)
@@ -368,15 +487,17 @@ if __name__ == "__main__":
 
     # 3) Train (or continue training) the agent and save the model to save_filepath
     rng = np.random.default_rng()
+    load_filepath = "trained_agent_0_3000.pth"
     trained_agent = train_agent(
         num_episodes=num_episodes,
         print_interval=50,
+        heuristic_start=None,
         load_filepath=load_filepath,      # Might be None if not found
         save_filepath=save_filepath, 
         lr=1e-4, 
         gamma=0.99,
-        epsilon_start=1.0, epsilon_end=0.050, epsilon_decay=0.996,
-        buffer_size=100000, batch_size=1024, target_update=200, rng=rng
+        epsilon_start=1.0, epsilon_end=0.050, epsilon_decay=0.995,
+        buffer_size=100000, batch_size=128, target_update=250, rng=rng
     )
 
     # 4) Test the agent
@@ -386,3 +507,5 @@ if __name__ == "__main__":
 
     # 5) save the model info in modelinfo.md
     save_model_info(trained_agent.policy_net.net, trained_agent.optimizer, nn.MSELoss())
+    
+    

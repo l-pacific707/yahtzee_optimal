@@ -61,7 +61,7 @@ class YahtzeeEnv(gym.Env):
 
     def get_score_for_action(self, action) -> int:
         """ self.dice: 2D numpy array (5*6), each row represents one number under one-hot encoding
-            action : 31-42 integer number
+            action : 32-43 integer number
             Return : score(int) for selected action
         """
         scoreto = action - 32  # Changed from 31 to 32
@@ -82,7 +82,7 @@ class YahtzeeEnv(gym.Env):
                 numbers[5] += 1
             else:
                 continue
-        for i in range(5):
+        for i in range(6):
             meresum += numbers[i] * (i + 1)
 
         if scoreto == 0:  # Ones
@@ -173,10 +173,10 @@ class YahtzeeEnv(gym.Env):
 
     def get_state(self) -> np.ndarray:
         return np.concatenate([
-            self.dice.flatten(),
+            self.dice.flatten(),  # 5*6 elements
             np.array([self.rerolls]),  # Convert scalar to array
             np.array([self.turn]),  # Convert scalar to array
-            self.scorecard,
+            self.scorecard, # 12 elements
             np.array([self.bonus], dtype=int)  # Convert boolean to int
         ])
 
@@ -229,21 +229,22 @@ class YahtzeeEnv(gym.Env):
             if self.rerolls == 0 :
                 try:
                     # averaging over 12 categories
-                    reward = self.get_sum_possible_score() / len(valid)
+                    reward = self.get_sum_possible_score() / len(valid) * 0.01
                 except ZeroDivisionError:
                     reward = 0
             else :
-                reward = self.get_expected_reward()
+                reward = self.get_expected_reward() * 0.01
+                reward = 0
             next_state = self.get_state()
             return next_state, reward, self.done, {}
 
         ## scoring action
         elif 32 <= action <= 43:  # Changed to range 32-43
             score = self.get_score_for_action(action)
-            reward = score 
+            reward = score * 0.1
             self._score_action(action, score)
             if self.bonus and (self.bonusRewarded is False):
-                reward += 35
+                reward += 3.5
                 self.bonusRewarded = True
             # reward += score / 63  # bonus contribution
             next_state = self.get_state()
@@ -258,6 +259,70 @@ class YahtzeeEnv(gym.Env):
             if sAction >= 32:
                 sum += self.get_score_for_action(sAction)
         return sum
+
+    def heuristic_policy(self):
+        '''
+        state(np.ndarray) ~45 dim, [dice1_oh,dice2_oh,...,dice5_oh,rerolls,turn,scorecard,bonus]
+        Returns : action(int)
+        '''
+        if self.rerolls == 3:
+            action = 0
+            return action
+        valid_actions = self.get_valid_action()
+        state = self.get_state()
+        dice1, dice2, dice3, dice4, dice5 = state[0:6], state[6:12], state[12:18], state[18:24], state[24:30]
+        
+        #one hot encoding to integer
+        def one_hot_to_int(one_hot: np.ndarray):
+            for i in range(len(one_hot)):
+                if one_hot[i] == 1:
+                    return i + 1
+            return 0
+        num1, num2, num3, num4, num5 = one_hot_to_int(dice1), one_hot_to_int(dice2), one_hot_to_int(dice3), one_hot_to_int(dice4), one_hot_to_int(dice5)
+        numbers = [num1,num2, num3, num4, num5]
+        occurence = [numbers.count(1), numbers.count(2), numbers.count(3), numbers.count(4), numbers.count(5),numbers.count(6)]
+        frequent_num = occurence.index(max(occurence)) + 1
+        
+        if (frequent_num - 32) in valid_actions:
+            # 가장 많이 나온 숫자로 점수화가 가능한가?
+            pass
+        else:
+            if valid_actions[0] < 38 :
+                # 상단부(숫자)에 빈 필드가 있어 점수화가 가능한가?
+                frequent_num = valid_actions[0] - 32
+            else:
+                pass
+        # scoring action : 32-43
+        # immediate scoring if yahtzee, small straight, or large straight
+        if self.get_score_for_action(41) and 41 in valid_actions:
+            action = 41
+            return action
+        elif self.get_score_for_action(42) and 42 in valid_actions:
+            action = 42
+            return action
+        elif self.get_score_for_action(43) and 43 in valid_actions:
+            action = 43
+            return action
+        else:
+            if self.rerolls :
+                mask = [1,1,1,1,1]
+                for i, _ in enumerate(numbers):
+                    if numbers[i] == frequent_num:
+                        mask[i] = 0
+                # mask to integer
+                action = 0
+                for i in range(5):
+                    action += (2 ** i) * mask[4-i]
+                return action
+            else:
+                # no reroll is available -> choose maximum score value
+                temp_score = []
+                for i, a in enumerate(valid_actions):
+                    temp_score.append(self.get_score_for_action(a))
+                return valid_actions[temp_score.index(max(temp_score))]
+                    
+
+        
 
     def get_expected_reward(self) -> float:
         """
