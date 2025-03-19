@@ -78,7 +78,7 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start = None, loa
         episode_rewards.append(episode_reward)
 
         try:
-            if agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600) == 0):
+            if (agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600) == 0)) or num_episodes < 600:
                 agent.epsilon *= agent.epsilon_decay
         except ZeroDivisionError:
             pass
@@ -469,7 +469,7 @@ if __name__ == "__main__":
     torch.device("cpu")
 
     # Number of training episodes for this run
-    num_episodes = 3000
+    num_episodes = 500
 
     # 1) Look for an existing trial file in the current directory
     trial = find_latest_trial(num_episodes)
@@ -487,7 +487,6 @@ if __name__ == "__main__":
 
     # 3) Train (or continue training) the agent and save the model to save_filepath
     rng = np.random.default_rng()
-    load_filepath = "trained_agent_0_3000.pth"
     trained_agent = train_agent(
         num_episodes=num_episodes,
         print_interval=50,
@@ -496,8 +495,8 @@ if __name__ == "__main__":
         save_filepath=save_filepath, 
         lr=1e-4, 
         gamma=0.99,
-        epsilon_start=1.0, epsilon_end=0.050, epsilon_decay=0.995,
-        buffer_size=100000, batch_size=128, target_update=250, rng=rng
+        epsilon_start=1.0, epsilon_end=0.080, epsilon_decay=0.996,
+        buffer_size=100000, batch_size=256, target_update=250, rng=rng
     )
 
     # 4) Test the agent
