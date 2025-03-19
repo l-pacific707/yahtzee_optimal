@@ -4,7 +4,6 @@ import numpy as np
 import os
 import re
 import matplotlib.pyplot as plt
-from DeepQNet import DQNet
 from DeepQNet import DQNAgent
 from YahtzeeEnv import YahtzeeEnv
 
