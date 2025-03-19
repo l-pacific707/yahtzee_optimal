@@ -25,9 +25,7 @@ class PrioritizedReplayMemory:
         """
         transition: (state, action, reward, next_state, done, valid_actions_next)
         """
-        # 처음에 최대 우선순위를 부여해 새로 들어온 샘플이 무조건 샘플될 기회를 준다.
-        # 혹은 버퍼 내 가장 큰 priority를 가져와 부여하는 식도 가능함
-        max_priority = max(self.priorities) if self.priorities else 1.0
+        max_priority = np.percentile(self.priorities, 90) if self.priorities else 1.0
         transition = Transition(*transition)
         if len(self.buffer) < self.capacity:
             self.buffer.append(transition)
@@ -37,35 +35,57 @@ class PrioritizedReplayMemory:
             self.priorities[self.position] = max_priority
         
         self.position = (self.position + 1) % self.capacity
-
-    def sample(self, batch_size):
+    
+    def sample(self, batch_size, current_epsilon):
         """
-        PER에 따라 batch_size만큼 샘플링하여 반환:
-        - transitions: 샘플된 transition
-        - indices: 샘플된 인덱스 목록
-        - weights: IS(Importance Sampling) weight 목록
+        PER-based sampling with epsilon-dependent behavior.
         """
         if len(self.buffer) == self.capacity:
             priorities = np.array(self.priorities)
         else:
             priorities = np.array(self.priorities[:self.position])
-        
-        # 확률 분포: p_i = priority_i^alpha / sum(priority^alpha)
-        probs = priorities ** self.alpha
-        probs /= probs.sum()
 
-        # probs 기반으로 인덱스 샘플링
-        indices = np.random.choice(len(priorities), batch_size, p=probs, replace=False)
+        # Mix PER with uniform sampling based on the latest epsilon
+        mix_ratio = max(0.1, 1 - current_epsilon)  # More PER as epsilon decreases
+        per_size = int(batch_size * mix_ratio)
+        uniform_size = batch_size - per_size
 
-        # IS weight 계산
-        # w_i = ( N * P(i) )^-beta
-        # 여기서 P(i)=probs[i], N=len(priorities)
-        weights = (len(priorities) * probs[indices]) ** (-self.beta)
-        # 가중치 정규화
-        weights /= weights.max()
-        
-        transitions = [self.buffer[idx] for idx in indices]
-        return transitions, indices, torch.FloatTensor(weights).unsqueeze(1)
+        # Ensure we don't sample more than available elements
+        available_samples = len(self.buffer)
+
+        # Uniform sampling
+        uniform_indices = np.random.choice(
+            available_samples, min(uniform_size, available_samples), replace=False
+        )
+
+        # PER sampling
+        if per_size > 0:
+            probs = priorities ** self.alpha
+            probs /= probs.sum()
+
+            per_indices = np.random.choice(
+                available_samples, min(per_size, available_samples), p=probs, replace=False
+            )
+
+            weights = (available_samples * probs[per_indices]) ** (-self.beta)
+            weights /= weights.max()
+        else:
+            per_indices = np.array([])  # Empty array if PER not used
+            weights = np.ones(uniform_size)  # Default weight of 1 for uniform samples
+
+        # If batch is too small, add extra uniform samples
+        total_samples = len(per_indices) + len(uniform_indices)
+        if total_samples < batch_size:
+            extra_needed = batch_size - total_samples
+            extra_indices = np.random.choice(available_samples, extra_needed, replace=True)
+            uniform_indices = np.concatenate((uniform_indices, extra_indices))
+
+        #  Use np.concatenate to merge indices efficiently
+        final_indices = np.concatenate((per_indices, uniform_indices)).astype(int)
+        final_transitions = [self.buffer[idx] for idx in final_indices]
+        final_weights = torch.FloatTensor(np.concatenate((weights, np.ones(len(uniform_indices))))).unsqueeze(1)
+
+        return final_transitions, final_indices, final_weights
 
     def update_priorities(self, indices, priorities):
         """

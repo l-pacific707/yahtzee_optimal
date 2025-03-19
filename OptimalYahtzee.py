@@ -89,7 +89,7 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start=None, load_
 
         episode_rewards.append(episode_reward)
 
-        if agent.epsilon > agent.epsilon_end and (episode % max(1, num_episodes // 600) == 0):
+        if agent.epsilon > agent.epsilon_end:
             agent.epsilon *= agent.epsilon_decay
 
 
@@ -547,7 +547,7 @@ if __name__ == "__main__":
     #print("Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     # Number of training episodes for this run
-    num_episodes = 100
+    num_episodes = 10000
 
     # 1) Look for an existing trial file in the current directory
     trial = find_latest_trial(num_episodes)
@@ -564,17 +564,18 @@ if __name__ == "__main__":
     save_filepath = f"trained_agent_{trial+1}_{num_episodes}.pth"
 
     # 3) Train (or continue training) the agent and save the model to save_filepath
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(105578965)
     trained_agent, loss_data, avg_reward_data = train_agent(
         num_episodes=num_episodes,
         print_interval=50,
+        alpha=0.4, beta_start=0.4, beta_increment=5e-5,
         heuristic_start=None,
         load_filepath=load_filepath,      # Might be None if not found
         save_filepath=save_filepath, 
-        lr=1e-4, 
+        lr=5e-5, 
         gamma=0.99,
-        epsilon_start=1.0, epsilon_end=0.080, epsilon_decay=0.996,
-        buffer_size=100000, batch_size=256, target_update=250, rng=rng , CUDA=False
+        epsilon_start=1.0, epsilon_end=0.080, epsilon_decay=0.99974,
+        buffer_size=200000, batch_size=256, target_update=250, rng=rng , CUDA=False
     )
 
     # 4) Test the agent

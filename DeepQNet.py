@@ -103,7 +103,7 @@ class DQNAgent:
             return
         
         # PER의 sample: transitions, indices, IS weights 반환
-        transitions, indices, weights = self.memory.sample(self.batch_size)
+        transitions, indices, weights = self.memory.sample(self.batch_size, self.epsilon)
         
         # transitions = list of tuples
         states = np.array([t.state for t in transitions], dtype=np.float32)

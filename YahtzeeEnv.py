@@ -226,13 +226,8 @@ class YahtzeeEnv(gym.Env):
         ## reroll action
         if 1 <= action <= 31:  # Changed from < 31 to range 1-31
             mask = self.int_to_bitmask(action)
-            prev_score = self.get_expected_reward()
             self._reroll_under_mask(mask) # reroll is decreased here
-            current_score = self.get_expected_reward()
-            if prev_score < current_score:
-                reward = 0.05
-            else:
-                reward = 0
+            reward = 0
             #reward = self.get_expected_reward() * 0.01
             next_state = self.get_state()
             return next_state, reward, self.done, {}
@@ -242,7 +237,7 @@ class YahtzeeEnv(gym.Env):
             score = self.get_score_for_action(action)
             # if reroll remaining and score is zero, why not reroll?
             if self.rerolls !=0 and score == 0:
-                reward = -2
+                reward = -0.5
             else:
                 reward = score * 0.1
             self._score_action(action, score)
