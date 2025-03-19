@@ -29,7 +29,7 @@ class DQNAgent:
                  buffer_size=10000, batch_size=64, target_update=100, rng=None,
                  alpha=0.6,        
                  beta_start=0.4,    
-                 beta_increment=1e-5): 
+                 beta_increment=1e-5, CUDA=True): 
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.gamma = gamma
@@ -48,7 +48,10 @@ class DQNAgent:
         self.memory = PrioritizedReplayMemory(buffer_size, alpha=self.alpha, beta=self.beta)
         
         #Cuda device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if CUDA:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = "cpu"
         
         
         self.policy_net = DQNet(state_dim, action_dim).to(self.device)

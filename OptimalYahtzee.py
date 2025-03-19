@@ -11,7 +11,7 @@ from YahtzeeEnv import YahtzeeEnv
 def train_agent(num_episodes=500, print_interval=10, heuristic_start=None, load_filepath=None, save_filepath=None, lr=1e-3, gamma=0.99,
                 epsilon_start=1.0, epsilon_end=0.010, epsilon_decay=0.995,
                 buffer_size=10000, batch_size=32, target_update=100, rng=None,
-                alpha=0.6, beta_start=0.4, beta_increment=1e-5):
+                alpha=0.6, beta_start=0.4, beta_increment=1e-5,CUDA=True):
     """
     Train the DQN agent on YahtzeeEnv for a specified number of episodes.
     Optionally load an existing agent's parameters from 'load_filepath'
@@ -45,7 +45,7 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start=None, load_
         agent = DQNAgent(state_dim, action_dim, lr=lr, gamma=gamma,
                          epsilon_start=epsilon_start, epsilon_end=epsilon_end, epsilon_decay=epsilon_decay,
                          buffer_size=buffer_size, batch_size=batch_size, target_update=target_update, rng=rng,
-                         alpha=alpha, beta_start=beta_start, beta_increment=beta_increment)
+                         alpha=alpha, beta_start=beta_start, beta_increment=beta_increment, CUDA=CUDA)
 
     if heuristic_start is not None and load_filepath is None:
         initialize_q_values(agent, env)
@@ -78,7 +78,8 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start=None, load_
             agent.push_memory((state, action, reward, next_state, done, next_valid_actions))
             loss = agent.optimize_model()
             if loss is not None:
-                last_loss = loss  # update the last computed loss
+                last_loss = loss.detach().cpu().item() if isinstance(loss, torch.Tensor) else float(loss)
+
 
             state = next_state
             total_steps += 1
@@ -88,18 +89,16 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start=None, load_
 
         episode_rewards.append(episode_reward)
 
-        try:
-            if (agent.epsilon > agent.epsilon_end and (episode % (num_episodes // 600) == 0)) or num_episodes < 600:
-                agent.epsilon *= agent.epsilon_decay
-        except ZeroDivisionError:
-            pass
+        if agent.epsilon > agent.epsilon_end and (episode % max(1, num_episodes // 600) == 0):
+            agent.epsilon *= agent.epsilon_decay
+
 
         if (episode + 1) % print_interval == 0:
             recent_rewards = episode_rewards[-print_interval:]
             avg_reward = np.mean(recent_rewards)
-            avg_reward_history.append(avg_reward)
-            loss_history.append(last_loss)
 
+            avg_reward_history.append(float(avg_reward))  # Ensure it's a float
+            loss_history.append(float(last_loss))  # Ensure it's a float
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
                 q_values = agent.policy_net(state_tensor).squeeze(0).cpu().numpy()
@@ -179,7 +178,6 @@ def save_plot(loss_data, avg_reward_data, save_filepath):
             for l, r in zip(loss_data, avg_reward_data):
                 writer.writerow([l, r])
         print(f"Saved plot data to {data_file} as a .csv file.")
-
 
 def initialize_q_values(agent, env):
     """
@@ -547,10 +545,9 @@ if __name__ == "__main__":
     # Just a debug check: prints True if GPU is available
     print("CUDA available?", torch.cuda.is_available())
     #print("Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-    torch.device("cpu")
 
     # Number of training episodes for this run
-    num_episodes = 500
+    num_episodes = 100
 
     # 1) Look for an existing trial file in the current directory
     trial = find_latest_trial(num_episodes)
@@ -577,7 +574,7 @@ if __name__ == "__main__":
         lr=1e-4, 
         gamma=0.99,
         epsilon_start=1.0, epsilon_end=0.080, epsilon_decay=0.996,
-        buffer_size=100000, batch_size=256, target_update=250, rng=rng
+        buffer_size=100000, batch_size=256, target_update=250, rng=rng , CUDA=False
     )
 
     # 4) Test the agent
