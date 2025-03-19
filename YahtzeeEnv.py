@@ -32,6 +32,7 @@ class YahtzeeEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(44)  # 0 : initial roll, 1-31: reroll, 32-43: filling the score)
         self._reset()
         self.rng = np.random.default_rng()
+        self.learn_initial = True
 
     def _reset(self):
         # Reset environment state (dice, categories, etc.)
@@ -225,23 +226,25 @@ class YahtzeeEnv(gym.Env):
         ## reroll action
         if 1 <= action <= 31:  # Changed from < 31 to range 1-31
             mask = self.int_to_bitmask(action)
-            self._reroll_under_mask(mask)
-            if self.rerolls == 0 :
-                try:
-                    # averaging over 12 categories
-                    reward = self.get_sum_possible_score() / len(valid) * 0.01
-                except ZeroDivisionError:
-                    reward = 0
-            else :
-                reward = self.get_expected_reward() * 0.01
+            prev_score = self.get_expected_reward()
+            self._reroll_under_mask(mask) # reroll is decreased here
+            current_score = self.get_expected_reward()
+            if prev_score < current_score:
+                reward = 0.05
+            else:
                 reward = 0
+            #reward = self.get_expected_reward() * 0.01
             next_state = self.get_state()
             return next_state, reward, self.done, {}
 
         ## scoring action
         elif 32 <= action <= 43:  # Changed to range 32-43
             score = self.get_score_for_action(action)
-            reward = score * 0.1
+            # if reroll remaining and score is zero, why not reroll?
+            if self.rerolls !=0 and score == 0:
+                reward = -2
+            else:
+                reward = score * 0.1
             self._score_action(action, score)
             if self.bonus and (self.bonusRewarded is False):
                 reward += 3.5
@@ -347,6 +350,20 @@ class YahtzeeEnv(gym.Env):
             reward += _expected_score(action - 31)
         return reward / len(valids) if valids else 0  # Prevent division by zero
     
+    def get_expected_reward(self) ->float:
+        """New, get average reward for current dice with valid scoring options.
+
+
+        Returns:
+            float: average score
+        """
+        scores = []
+        valids = self.get_valid_action()
+        start_idx = valids.index(32)
+        valids = valids[start_idx:]
+        for action in valids:
+            scores.append(self.get_score_for_action(action))
+        return np.mean(scores)
 
     @staticmethod
     def int_to_bitmask(num):
