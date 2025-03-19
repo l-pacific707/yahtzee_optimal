@@ -569,7 +569,7 @@ if __name__ == "__main__":
 
     # 3) Train (or continue training) the agent and save the model to save_filepath
     rng = np.random.default_rng()
-    trained_agent = train_agent(
+    trained_agent, loss_data, avg_reward_data = train_agent(
         num_episodes=num_episodes,
         print_interval=50,
         heuristic_start=None,
@@ -588,5 +588,9 @@ if __name__ == "__main__":
 
     # 5) save the model info in modelinfo.md
     save_model_info(trained_agent.policy_net.net, trained_agent.optimizer, nn.MSELoss())
+    
+    #6) save the plot
+    save_plot(loss_data, avg_reward_data, save_filepath)
+    print("Training complete.")
     
     
