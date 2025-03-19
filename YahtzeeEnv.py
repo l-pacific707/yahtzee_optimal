@@ -359,7 +359,11 @@ class YahtzeeEnv(gym.Env):
         """
         scores = []
         valids = self.get_valid_action()
-        start_idx = valids.index(32)
+        start_idx = 0
+        for i, action in enumerate(valids):
+            if action >= 32:
+                start_idx = i
+                break
         valids = valids[start_idx:]
         for action in valids:
             scores.append(self.get_score_for_action(action))
