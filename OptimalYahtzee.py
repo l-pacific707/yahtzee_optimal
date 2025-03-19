@@ -3,29 +3,36 @@ import torch.nn as nn
 import numpy as np
 import os
 import re
+import matplotlib.pyplot as plt
 from DeepQNet import DQNet
 from DeepQNet import DQNAgent
 from YahtzeeEnv import YahtzeeEnv
 
 
-def train_agent(num_episodes=500, print_interval=10, heuristic_start = None, load_filepath=None, save_filepath=None, lr=1e-3, gamma=0.99,
-                 epsilon_start=1.0, epsilon_end=0.010, epsilon_decay=0.995,
-                 buffer_size=10000, batch_size=32, target_update=100, rng=None,
-                 alpha=0.6, beta_start=0.4, beta_increment=1e-5):
+def train_agent(num_episodes=500, print_interval=10, heuristic_start=None, load_filepath=None, save_filepath=None, lr=1e-3, gamma=0.99,
+                epsilon_start=1.0, epsilon_end=0.010, epsilon_decay=0.995,
+                buffer_size=10000, batch_size=32, target_update=100, rng=None,
+                alpha=0.6, beta_start=0.4, beta_increment=1e-5):
     """
     Train the DQN agent on YahtzeeEnv for a specified number of episodes.
     Optionally load an existing agent's parameters from 'load_filepath'
     and/or save the agent after training to 'save_filepath'.
-    
+
+    In addition to training, this function now collects the loss (last computed loss in the episode)
+    and the average reward (computed over every print_interval episodes) into lists.
+
     Args:
         num_episodes (int): Number of episodes (full games) to train.
         print_interval (int): Print progress every this many episodes.
-        load_filepath (str or None): Path to a saved agent checkpoint. 
+        load_filepath (str or None): Path to a saved agent checkpoint.
                                      If provided, loads that agent first.
         save_filepath (str or None): Path to save the trained agent after training.
-    
+        (Other hyperparameters omitted for brevity)
+
     Returns:
-        DQNAgent: The trained (or further trained) DQN agent.
+        agent: The trained (or further trained) DQN agent.
+        loss_history: List of loss values recorded at each print interval.
+        avg_reward_history: List of average rewards (over print_interval episodes) recorded at each print interval.
     """
     env = YahtzeeEnv()
     state_dim = env.get_state().shape[0]
@@ -37,20 +44,23 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start = None, loa
         agent.epsilon = epsilon_start
     else:
         agent = DQNAgent(state_dim, action_dim, lr=lr, gamma=gamma,
-                 epsilon_start=epsilon_start, epsilon_end=epsilon_end, epsilon_decay=epsilon_decay,
-                 buffer_size=buffer_size, batch_size=batch_size, target_update=target_update, rng=rng,
-                 alpha=alpha, beta_start=beta_start, beta_increment=beta_increment)
+                         epsilon_start=epsilon_start, epsilon_end=epsilon_end, epsilon_decay=epsilon_decay,
+                         buffer_size=buffer_size, batch_size=batch_size, target_update=target_update, rng=rng,
+                         alpha=alpha, beta_start=beta_start, beta_increment=beta_increment)
 
     if heuristic_start is not None and load_filepath is None:
         initialize_q_values(agent, env)
-        play_episode(agent,"initialmodel.md")
+        play_episode(agent, "initialmodel.md")
         test_policy(num_test_episodes=100)
-        print("Initializaiton done. Training starts...")
+        print("Initialization done. Training starts...")
         test_agent(agent, num_test_episodes=10)
         save_agent(agent, "heuristic_qvalue.pth")
 
     total_steps = 0
     episode_rewards = []
+    loss_history = []
+    avg_reward_history = []
+    last_loss = 0.0  # to hold the most recent loss value
 
     for episode in range(num_episodes):
         env._reset()
@@ -68,6 +78,8 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start = None, loa
 
             agent.push_memory((state, action, reward, next_state, done, next_valid_actions))
             loss = agent.optimize_model()
+            if loss is not None:
+                last_loss = loss  # update the last computed loss
 
             state = next_state
             total_steps += 1
@@ -86,18 +98,88 @@ def train_agent(num_episodes=500, print_interval=10, heuristic_start = None, loa
         if (episode + 1) % print_interval == 0:
             recent_rewards = episode_rewards[-print_interval:]
             avg_reward = np.mean(recent_rewards)
+            avg_reward_history.append(avg_reward)
+            loss_history.append(last_loss)
 
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
                 q_values = agent.policy_net(state_tensor).squeeze(0).cpu().numpy()
                 avg_q_value = np.mean(q_values)
 
-            print(f"Episode {episode+1}/{num_episodes} - Reward: {episode_reward:.2f}, Avg Reward: {avg_reward:.2f}, Avg Q-value: {avg_q_value:.2f}, Loss: {loss:.6f},  Score: {env.scorecard[0:6]}|{env.scorecard[6:]},total : {np.sum(env.scorecard)}, Epsilon: {agent.epsilon:.3f}")
+            print(f"Episode {episode+1}/{num_episodes} - Reward: {episode_reward:.2f}, "
+                  f"Avg Reward: {avg_reward:.2f}, Avg Q-value: {avg_q_value:.2f}, "
+                  f"Loss: {last_loss:.6f}, Score: {env.scorecard[0:6]}|{env.scorecard[6:]}, "
+                  f"Total Score: {np.sum(env.scorecard)}, Epsilon: {agent.epsilon:.3f}")
 
     if save_filepath is not None:
         save_agent(agent, save_filepath)
 
-    return agent
+    return agent, loss_history, avg_reward_history
+
+def save_plot(loss_data, avg_reward_data, save_filepath):
+    """
+    Generate and save separate plots for loss and average reward trends over training.
+    Also, save the loss and average reward data into a file. The file name is based on the
+    same base name as the saved .pth file. If saving as a .mat file is possible, then use .mat;
+    otherwise, save as a .csv file.
+
+    The function creates two plots:
+        - Loss Trend over Training
+        - Average Reward Trend over Training
+
+    Args:
+        loss_data (list): List of loss values recorded at each print interval.
+        avg_reward_data (list): List of average rewards recorded at each print interval.
+        save_filepath (str): The file path used to save the agent (.pth file). The plot and data files
+                             will use the same base name.
+    """
+    base_name = os.path.splitext(save_filepath)[0]
+
+    # Plot for Loss Data
+    plt.figure(figsize=(8, 5))
+    plt.plot(loss_data, 'b-', label="Loss")
+    plt.xlabel('Print Interval Index')
+    plt.ylabel('Loss')
+    plt.title('Loss Trend over Training')
+    plt.legend()
+    plt.grid(True)
+    loss_plot_file = base_name + '_loss.png'
+    plt.savefig(loss_plot_file)
+    plt.close()
+    print(f"Saved loss plot to {loss_plot_file}.")
+
+    # Plot for Average Reward Data
+    plt.figure(figsize=(8, 5))
+    plt.plot(avg_reward_data, 'r-', label="Average Reward")
+    plt.xlabel('Print Interval Index')
+    plt.ylabel('Average Reward')
+    plt.title('Average Reward Trend over Training')
+    plt.legend()
+    plt.grid(True)
+    reward_plot_file = base_name + '_reward.png'
+    plt.savefig(reward_plot_file)
+    plt.close()
+    print(f"Saved average reward plot to {reward_plot_file}.")
+
+    # Save data in a .mat file if possible, else in a .csv file.
+    try:
+        import scipy.io
+        data = {
+            'loss': loss_data,
+            'avg_reward': avg_reward_data,
+        }
+        data_file = base_name + '.mat'
+        scipy.io.savemat(data_file, data)
+        print(f"Saved plot data to {data_file} as a .mat file.")
+    except ImportError:
+        import csv
+        data_file = base_name + '.csv'
+        with open(data_file, mode='w', newline='') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(['loss', 'avg_reward'])
+            for l, r in zip(loss_data, avg_reward_data):
+                writer.writerow([l, r])
+        print(f"Saved plot data to {data_file} as a .csv file.")
 
 
 def initialize_q_values(agent, env):
