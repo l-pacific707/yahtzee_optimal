@@ -1,279 +1,296 @@
 import numpy as np
-from itertools import combinations_with_replacement
-from itertools import combinations
-from itertools import product
 from collections import defaultdict
-import math
+from itertools import combinations_with_replacement
+import logging
 import pickle
+import logging 
 
+logging.basicConfig(
+    level = logging.DEBUG,
+    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s)'
+)
 
+def show_all_attributes(obj):
+    for attr in dir(obj):
+        if not attr.startswith("__"):
+            print(f"{attr} = {getattr(obj, attr)}")
 
-class YahtzeeEnvDP:
+class Roll:
     NUMBER_OF_DICE = 5
     NUMBER_OF_SIDES = 6
-    LENGTH_OF_CATEGORY = 12
-
-    ALL_DICE_STATE = np.array(list(combinations_with_replacement(range(1, 1 + NUMBER_OF_SIDES), NUMBER_OF_DICE)))
-
-    @classmethod
-    def get_all_state(cls):
-        """Generate all possible states as a proper 2D array (each row is a full state vector)."""
-
-        all_dice_state = cls.ALL_DICE_STATE  # Shape: (252, 5)
-        all_availables = np.array(list(product([0, 1], repeat=cls.LENGTH_OF_CATEGORY)))  # Shape: (4096, 12)        
-        all_rerolls = np.array([0, 1, 2, 3])  # Shape: (4,)
-        all_upscores = np.array(range(0, 64))  # Shape: (64,)
-
-        print(f"all_dice_state shape: {all_dice_state.shape}")  # Should be (252, 5)
-        print(f"all_availables shape: {all_availables.shape}")  # Should be (?, 12)
-        print(f"all_rerolls shape: {all_rerolls.shape}")  # Should be (4,)
-        print(f"all_upscores shape: {all_upscores.shape}")  # Should be (64,)
-
-        # Generate Cartesian product
-        state_list = []
-        steps = 0
-        for dice, available, upscore, reroll in product(all_dice_state, all_availables, all_upscores, all_rerolls):
-            state_vector = np.hstack([dice, available, [upscore], [reroll]])  # Ensure all elements are in 1D form
-            state_list.append(state_vector)
-            steps += 1
-            if steps % 1000000 == 0:
-                print(f'steps {steps} is done.')
-
-        # Convert to a 2D NumPy array
-        all_state = np.array(state_list, dtype=np.int32)  # Shape: (total_states, 19)
-
-        print(f"Final state space shape: {all_state.shape}")  # Should be (N, 19)
-        cls.save_object(all_state, "state_space.pkl")
-        return all_state
+    ALL_DICE_STATES = tuple(combinations_with_replacement(range(1, NUMBER_OF_SIDES + 1), NUMBER_OF_DICE))
     
-    @classmethod
-    def initialize_class(cls, load_filepath = "state_space.pkl"):
-        """Initialize class variables after definition."""
-        try:
-            cls.ALL_STATE = cls.load_object(load_filepath)
-        except FileNotFoundError:
-            cls.ALL_STATE = cls.get_all_state()
-    
-    def __init__(self, dice_state = np.zeros(NUMBER_OF_DICE, dtype = np.int32), availables = np.zeros(LENGTH_OF_CATEGORY , dtype=np.int32), upscore = 0, reroll = 0) -> None:
-        self.dice_state = dice_state
-        self.availables = availables # total 12 categories
-        self.upscore = upscore # 0-63 
-        self.reroll = reroll # 0-3
+    def __init__(self, seed = None):
+        self.rng = np.random.default_rng(seed)
+        self.r = self.rng.randint(1, self.NUMBER_OF_SIDES + 1, self.NUMBER_OF_DICE)
+        self.logger = logging.getLogger(self.__class__.__name__)
         
-    
-    def reset(self):
-        self.dice = np.zeros(5, dtype = np.int32)
-        self.availables = np.zeros(12 , dtype=np.int32) # total 12 categories
-        self.upscore = 0 # 0-63 
-        self.reroll = 0 # 0-3
-        self.state = self.get_state()
-    
-    @staticmethod
-    def transition_prob(state, action, next_state) -> float:
-        """calculate transition probability from s to s'
+    def reroll(self, keep_mask = 0b00000) -> None:
+        """reroll current roll under keep_mask .
+        - 0b0001 means first four number will be changed.
+        - this method changes instance's r attribute. in-place.
 
         Args:
-            state (ndarray): (dicestate(5), availables(12, ), upscore(1), reroll(1)) : shape(19,)
-            action (integer): initiate roll (0), reroll (1-31), scoring(32-43)
-            next_state (ndarray): changed state, (dicestate(5), availables(12), upscore(1), reroll(1)) : shape(19,)
-        """
-        current_dice = state[0:5]
-        current_availables = state[5:17]
-        current_upscore = state[17]
-        current_reroll = state[18]
-        
-        next_dice = next_state[0:5]
-        next_availables = next_state[5:17]
-        next_upscore = next_state[17]
-        next_reroll = next_state[18]
+            keep_mask (binary int, optional): mask for keep choice of dice. Defaults to 0b00000(reroll every thing).
 
-        if 1<=action<=31 :
-            #Reroll
-            if next_reroll != current_reroll - 1:
-                return 0.0
-            elif np.any(next_availables != current_availables):
-                return 0.0
-            elif next_upscore != current_upscore:
-                return 0.0
-            else:
-                reroll_mask = YahtzeeEnvDP.int_to_bitmask(action)
-                non_selected_nums = []
-                for i, yes in enumerate(reroll_mask):
-                    if not yes:
-                        non_selected_nums.append(current_dice[i])
-                for nums in non_selected_nums:
-                    if nums not in next_dice:
-                        return 0.0
-                    else:
-                        next_dice.remove(nums)
-                k = YahtzeeEnvDP.NUMBER_OF_DICE - len(next_dice) # how many dice will be reroll-ed?
-                
-                diffs = defaultdict(int) # num : occurences dictionary
-                
-                for i, num in np.sort(next_dice):
-                    diffs[num] += 1
-                
-                prob = ((1/6) ** k ) * math.factorial(k) # default probability
-                for num in diffs.keys():
-                    prob /= math.factorial(diffs[num])
-                return prob
-        elif 32<=action<=43:
-            #Scoring
-            category_tobe_scored_idx = action - 32 # 0-11  (index)
-            change = (current_availables != next_availables)
-            if np.sum(change) == 1 and change[category_tobe_scored_idx] == True and next_reroll == 3 and current_availables[category_tobe_scored_idx] == 1 and next_dice == np.zeros(YahtzeeEnvDP.LENGTH_OF_CATEGORY, dtype = np.int32) and current_upscore == next_upscore:
-                return 1.0
-            else:
-                return 0.0
-        elif action == 0:
-            #Initiate roll
-            if current_reroll != 3 or next_reroll !=2 :
-                return 0.0
-            elif np.any(next_availables != current_availables):
-                return 0.0
-            elif next_upscore != current_upscore:
-                return 0.0
-            else:
-                k = YahtzeeEnvDP.NUMBER_OF_DICE # how many dice will be reroll-ed?
-                
-                diffs = defaultdict(int) # num : occurences dictionary
-                
-                for i, num in np.sort(next_dice):
-                    diffs[num] += 1
-                
-                prob = ((1/6) ** k ) * math.factorial(k) # default probability
-                for num in diffs.keys():
-                    prob /= math.factorial(diffs[num])
-                return prob
-
-    def make_transition_prob_table(state_space, save_filepath = "transition_prob_table.pkl"):
-        """Make dictionary of transition probability table
-
-
-        Args:
-            state_space (_type_): _description_
-            action_space (_type_): _description_
-
-        Returns:
-            dictionary
-            -keys : (current state, action, next_state)
-            - values : non-zero transition probability , i.e. p(s_|s,a)
-        """
-        table = defaultdict()
-        for s in state_space:
-            valid_action = YahtzeeEnvDP(s[0:5], s[5:17], s[17], s[18]).get_valid_action()
-            for a in valid_action:
-                for s_ in state_space:
-                    prob = YahtzeeEnvDP.transition_prob(s,a,s_)
-                    if prob != 0:
-                        table[(s,a,s_)] = prob
-        YahtzeeEnvDP.save_object(table, save_filepath)
-        return table
+        """        
+        for i, num in enumerate(f"{keep_mask:05b}"):
+            if i != '1':
+                self.r[num] = self.rng.randint(1, self.NUMBER_OF_SIDES + 1)
     
-    def get_state(self) -> np.ndarray:
-        """Return state
+    def count_numbers(self, dice : np.ndarray = None):
+        occurence = np.zeros(self.NUMBER_OF_SIDES, dtype = np.int32)
+        if dice is None:
+            dice = self.r
+        for i in dice:
+            occurence[i-1] += 1
+        return occurence
+    
+    def has_one_pair(self):
+        occurence = self.count_numbers()
+        return np.sum(occurence == 2) == 1
+    
+    def has_two_pair(self):
+        occurence = self.count_numbers()
+        return np.sum(occurence == 2) == 2
+    
 
-        Returns:
-            ndarray : state, shape: (19,)
+    def has_full_house(self):
+        occurence = self.count_numbers()
+        return np.any(occurence == 2) and np.any(occurence == 3)
+    
+    def has_three_of_a_kind(self):
+        occurence = self.count_numbers()
+        return np.any(occurence == 3)
+    
+    def has_four_of_a_kind(self):
+        occurence = self.count_numbers()
+        return np.any(occurence == 4)
+    
+    def has_small_straight(self):
+        seriesness = 0
+        for i in range(len(self.r)-1):
+            if self.r[i] + 1 == self.r[i+1]:
+                seriesness += 1
+                if seriesness == 3:
+                    return True
+        return False
+    
+    def has_large_straight(self):
+        for i in range(len(self.r)-1):
+            if self.r[i] + 1 == self.r[i+1]:
+                continue
+            else:
+                return False
+        return True
+    
+    def has_yahtzee(self):
+        occurence = self.count_numbers()
+        return np.any(occurence == 5)
+        
+    def count_k(self, k : int) -> int:
+        """Count how many k is shown in the roll. k = 1~"""
+        occurence = self.count_numbers()
+        return occurence[k-1]
+    
+    
+    def get_keep_choices_bitmask(self):
         """
-        return np.concatenate(self.dice_state, self.availables, np.array([self.upscore]), np.array([self.reroll]))
+        주어진 주사위 결과에서 중복을 고려하여 고유한 keep 선택지를 bitmask (2진수 정수) 형태로 반환한다.
+        각 bitmask는 원래 dice 리스트의 인덱스 순서대로 '1'(유지) 또는 '0'(버림)을 나타낸다.
+        동일한 값의 주사위에서는, 예를 들어 [1, 1]이 있다면, 1개를 선택하는 경우 항상 첫번째 1을 선택하는 형태로 canonical하게 결정된다.
+        """
+        # 값 별로 인덱스를 그룹핑 (원래 순서 유지)
+        dice = self.r
+        groups = defaultdict(list)
+        for idx, value in enumerate(dice):
+            groups[value].append(idx)
+        
+        # 그룹 순서는 dice에서 처음 등장하는 순서대로 정렬
+        group_keys = sorted(groups.keys(), key=lambda x: groups[x][0]) # [1,1,2,3,4] => [1,2,3,4]
+        
+        results = []
+        n = len(dice)
+        
+        def backtrack(group_idx, current_mask):
+            # 모든 그룹에 대해 처리한 경우 현재 bitmask를 결과에 추가
+            if group_idx == len(group_keys):
+                results.append("".join(current_mask))
+                return
+            
+            key = group_keys[group_idx]
+            indices = groups[key] # key 가 등장했던 모든 index 들
+            count = len(indices)
+            # 해당 그룹에서는 0부터 count개까지 선택할 수 있음.
+            # canonical하게 선택하려면, k개를 선택하는 경우 항상 그룹 내 가장 앞쪽 k개 인덱스를 선택.
+            for k in range(count + 1):
+                new_mask = current_mask[:]  # 현재 bitmask 복사
+                for pos_idx, dice_idx in enumerate(indices):
+                    new_mask[dice_idx] = '1' if pos_idx < k else '0'
+                backtrack(group_idx + 1, new_mask)
+        
+        # 초기 bitmask: 모든 주사위에 대해 선택하지 않은 상태('0')로 초기화
+        initial_mask = ['0'] * n
+        backtrack(0, initial_mask)
+        
+        for i, item in enumerate(results):
+            results[i] = int(item, 2)
+        
+        return results # e.g) [0b00000, 0b00001, ...]
 
-    def get_valid_action(self) :
-        state = self.get_state()
-        current_availables = state[5:17]
-        current_reroll = state[18]
-        
-        valid_actions = []
-        if current_reroll == 3:
-            valid_actions.append(0)
-            return valid_actions
-        #reroll options
-        elif current_reroll >= 1:
-            for i in range(1,32):
-                valid_actions.append(i)
-        #scoring options
-        for i, num in enumerate(current_availables):
-            if num == 1:
-                valid_actions.append(i+32)
-        return sorted(valid_actions)
-        
+    def transition_prob(self, keep_mask : int, outcome : np.ndarray):
+        nums_to_keep = []
+        for i, num in enumerate(f"{keep_mask:05b}"):
+            if i == '1':
+                nums_to_keep.append(self.r[num])
+        for num in nums_to_keep:
+            if num not in outcome:
+                return 0
+        k = Roll.NUMBER_OF_DICE - len(nums_to_keep)
+        return 1/(6**k)
         
     @staticmethod
-    def policy_evaluation(value, transition_prob, state_space, reward_func, policy, gamma = 1.0, n_steps = 1, initialize=True):
-        """Evaluate the value function for current policy.
+    def count_numbers_from_dice(dice : np.ndarray):
+        occurence = np.zeros(Roll.NUMBER_OF_SIDES, dtype = np.int32)
+        for i in dice:
+            occurence[i-1] += 1
+        return occurence
+
+
+    
+    @staticmethod
+    def get_keep_choices_bitmask_from_list(dice : list):
+        """
+        주어진 주사위 결과에서 중복을 고려하여 고유한 keep 선택지를 bitmask (2진수 정수) 형태로 반환한다.
+        각 bitmask는 원래 dice 리스트의 인덱스 순서대로 '1'(유지) 또는 '0'(버림)을 나타낸다.
+        동일한 값의 주사위에서는, 예를 들어 [1, 1]이 있다면, 1개를 선택하는 경우 항상 첫번째 1을 선택하는 형태로 canonical하게 결정된다.
+        """
+        # 값 별로 인덱스를 그룹핑 (원래 순서 유지)
+        groups = defaultdict(list)
+        for idx, value in enumerate(dice):
+            groups[value].append(idx)
+        
+        # 그룹 순서는 dice에서 처음 등장하는 순서대로 정렬
+        group_keys = sorted(groups.keys(), key=lambda x: groups[x][0]) # [1,1,2,3,4] => [1,2,3,4]
+        
+        results = []
+        n = len(dice)
+        
+        def backtrack(group_idx, current_mask):
+            # 모든 그룹에 대해 처리한 경우 현재 bitmask를 결과에 추가
+            if group_idx == len(group_keys):
+                results.append("".join(current_mask))
+                return
+            
+            key = group_keys[group_idx]
+            indices = groups[key] # key 가 등장했던 모든 index 들
+            count = len(indices)
+            # 해당 그룹에서는 0부터 count개까지 선택할 수 있음.
+            # canonical하게 선택하려면, k개를 선택하는 경우 항상 그룹 내 가장 앞쪽 k개 인덱스를 선택.
+            for k in range(count + 1):
+                new_mask = current_mask[:]  # 현재 bitmask 복사
+                for pos_idx, dice_idx in enumerate(indices):
+                    new_mask[dice_idx] = '1' if pos_idx < k else '0'
+                backtrack(group_idx + 1, new_mask)
+        
+        # 초기 bitmask: 모든 주사위에 대해 선택하지 않은 상태('0')로 초기화
+        initial_mask = ['0'] * n
+        backtrack(0, initial_mask)
+        
+        for i, item in enumerate(results):
+            results[i] = int(item, 2)
+        
+        return results # e.g) [0b00000, 0b00001, ...]
+
+
+    
+    
+
+
+class ScoreCard:
+    CATEGORY_LIST = ['1','2','3','4','5','6','CH','FH','3K','4K','SS','LS','YA']
+    LENGTH_OF_CATEGORY = len(CATEGORY_LIST)
+    
+    def __init__(self):
+        self.usedC = []
+        self.current_scores = np.zeros(self.LENGTH_OF_CATEGORY, dtype = np.int32) # 1D ndarray
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    @staticmethod
+    def print_category_names():
+        print(ScoreCard.CATEGORY_LIST)
+        
+    def get_upscore(self):
+        return np.sum(self.current_scores[0:6])
+    
+    def get_total_score(self):
+        return np.sum(self.current_scores)
+    
+    def get_score_for_category(self, dice : Roll , category : int):
+        """_summary_
 
         Args:
-            value (dict) : value function for state s
-            transition_prob (_type_): 
-            state_space (_type_): _description_
-            reward_func (_type_): _description_
-            policy (_type_): _description_
-            gamma (_type_): _description_
-            n_steps (int, optional): _description_. Defaults to 1.
+            dice (Roll): Roll object. 
+            category (int): 0-12, total 13 categories for yahtzee
 
         Returns:
             _type_: _description_
-        """        
-        if initialize:
-            #initialize V(s)
-            V = defaultdict()
-            for s in state_space:
-                V[s] = 0
-        else:
-            V = value
-        # iteration start
-        for _ in range(n_steps):
-            for s in state_space:
-                v = V[s]
-                #assuming deterministic policy
-                for s_ in state_space:
-                    V[s] = transition_prob(s, policy[s], s_) * (reward_func(s,policy[s]) + gamma * V[s_])
-        return V
-    
-    @staticmethod
-    def policy_improvement(value, transition_prob, state_space, reward_func, policy : dict, gamma : float = 1.0):
-        
-        # greedy select action policy
-        V = value
-        policy_stable = True
-        for s in state_space:
-            old_action = policy[s]
-            current_dice = s[0:5]
-            current_availables = s[5:17]
-            current_upscore = s[17]
-            current_reroll = s[18]
-            env = YahtzeeEnvDP(current_dice, current_availables, current_upscore, current_reroll)
-            valid_action = env.get_valid_action()
-            action_choice = []
-            for a in valid_action:
-                temp = 0
-                for s_ in state_space:
-                    temp += transition_prob(s, a, s_) * (reward_func(s,a) + gamma * V[s_])
-                action_choice.append(temp)
-            policy[s] = valid_action[np.argmax(action_choice)]
-            if old_action != policy[s]:
-                policy_stable = False
-        return policy, policy_stable
-    
-    @staticmethod
-    def int_to_bitmask(num):
-        """Change an integer number to a 5-bit mask corresponding to num in binary representation.
-
-        Input: integer number (1-31)
-        Output: list of integers representing a 5-bit mask.
-
-        Example:
-            input: 21
-            return: [1, 0, 1, 1, 0] 
         """
-        if not 1 <= num <= 31:
-            raise ValueError("Input number must be between 0(inclusive) and 30 (inclusive).")
+        if isinstance(category, str):
+            category = self.CATEGORY_LIST.index(category) # if category is string, convert it to integer index
+        if ScoreCard.is_upper_section(category):
+            return dice.count_k(category+1) * (category+1)
+        elif ScoreCard.is_lower_section(category):
+            if dice.has_four_of_a_kind or dice.has_three_of_a_kind:
+                return np.sum(dice.r)
+            elif dice.has_full_house:
+                return 25
+            elif dice.has_small_straight:
+                return 30
+            elif dice.has_large_straight:
+                return 40
+            elif dice.has_yahtzee:
+                return 50
 
-        # Convert to binary, remove '0b' prefix, and fill with leading zeros to ensure 5 bits
-        bitmask = list(map(int, format(num, '05b'))) # change the num+1 to num
-
-        return bitmask
+    def fill_score(self,dice : Roll,category):
+        if isinstance(category, str):
+            category = self.CATEGORY_LIST.index(category)
+        self.current_scores[category] = self.get_score_for_category(dice,category)
+        self.usedC.append(category)
+        
     
+    @staticmethod
+    def is_upper_section(category):
+        if isinstance(category,str):
+            return str in ['1','2','3','4','5','6']
+        else:
+            return category in [0,1,2,3,4,5]
+    
+    @staticmethod
+    def is_lower_section(category):
+        if isinstance(category, str):
+            return str in ['CH','FH','3K','4K','SS','LS','YA']
+        else:
+            return category in [6,7,8,9,10,11,12]
+    
+
+class YahtzeeEnvDP(ScoreCard, Roll):
+
+    def __init__(self, reroll = 3, seed=None) -> None:
+        self.currentRoll = Roll(seed)
+        self.scorecard = ScoreCard()
+        self.upscore = self.scorecard.get_upscore() # 0-63
+        self.left_reroll = reroll # 0-3
+        
+    
+    def reset(self):
+        self.currentRoll = self.currentRoll.reroll()
+        self.scorecard = ScoreCard()
+        self.upscore = self.scorecard.get_upscore()
+        self.reroll = 3
+    
+            
+
     @staticmethod
     def save_object(obj, filename):
         with open(filename, 'wb') as outp:  # Overwrites any existing file.
