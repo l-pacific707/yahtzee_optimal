@@ -1,6 +1,5 @@
 import pickle
 import numpy as np
-import copy
 from YahtzeeEnvDP import ScoreCard, Roll
 
 
@@ -29,9 +28,10 @@ def find_unreachable_state(load_file_path = None):
     else:
         S = [x for x in range(1, Roll.NUMBER_OF_SIDES+1)] # [1,2,3,4,5,6]
         # R is initialized with False value
-        R = np.zeros((64,2**Roll.NUMBER_OF_SIDES), dtype= np.bool) # 0<=n<=63, 2**6 : # of subsets of {1,2,3,4,5,6} (categories to be filled)
+        R = np.zeros(( ScoreCard.BONUS_THRESHOLD + 1,2**Roll.NUMBER_OF_SIDES), dtype= np.bool) # 0<=n<=63, 2**6 : # of subsets of {1,2,3,4,5,6} (categories to be filled)
         
         subS = _all_subsets_bitmask(S) # list of tuples [(), (1), (2), ...]
+        print(f"number of subsets: {len(subS)}")
         subsettoindex = {}
         for i, ss in enumerate(subS):
             subsettoindex[ss] = i
@@ -71,14 +71,14 @@ def load_reachable_state(pkl_path="reachable_state.pkl"):
     return R
     
 
-def _all_subsets_bitmask(s):
+def _all_subsets_bitmask(s, reverse = False):
     s = list(s)
     n = len(s)
     subsets = []
     for i in range(1 << n):  # 0부터 2^n - 1까지
         subset = [s[j] for j in range(n) if (i >> j) & 1]
         subsets.append(tuple(subset))
-    subsets.sort(key=len)
+    subsets.sort(key=len,reverse=reverse)
     return subsets
 
 def _save_reachable_state_as_markdown(pkl_path="reachable_state.pkl", output_path="reachable_state.md"):

@@ -1,14 +1,15 @@
 import numpy as np
 from collections import defaultdict
+from collections import Counter
 from itertools import combinations_with_replacement
 import logging
 import pickle
-import logging 
+import logger_setup
+import math
 
-logging.basicConfig(
-    level = logging.DEBUG,
-    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s)'
-)
+
+logger = logging.getLogger(__name__)
+
 
 def show_all_attributes(obj):
     for attr in dir(obj):
@@ -18,13 +19,18 @@ def show_all_attributes(obj):
 class Roll:
     NUMBER_OF_DICE = 5
     NUMBER_OF_SIDES = 6
-    ALL_DICE_STATES = tuple(combinations_with_replacement(range(1, NUMBER_OF_SIDES + 1), NUMBER_OF_DICE))
+    ALL_DICE_STATES = ((0,0,0,0,0), *tuple(combinations_with_replacement(range(1, NUMBER_OF_SIDES + 1), NUMBER_OF_DICE)))
     
-    def __init__(self, seed = None):
+    def __init__(self, roll= None, seed = None):
         self.rng = np.random.default_rng(seed)
-        self.r = self.rng.randint(1, self.NUMBER_OF_SIDES + 1, self.NUMBER_OF_DICE)
-        self.logger = logging.getLogger(self.__class__.__name__)
+        if roll is None:
+            self.r = np.zeros(self.NUMBER_OF_DICE, dtype = np.int32)
+        else:
+            self.r = roll
         
+    def reset(self):
+        self.r = np.zeros(self.NUMBER_OF_DICE, dtype = np.int32)
+    
     def reroll(self, keep_mask = 0b00000) -> None:
         """reroll current roll under keep_mask .
         - 0b0001 means first four number will be changed.
@@ -94,7 +100,7 @@ class Roll:
         return occurence[k-1]
     
     
-    def get_keep_choices_bitmask(self):
+    def get_all_keep_choices_bitmask(self):
         """
         주어진 주사위 결과에서 중복을 고려하여 고유한 keep 선택지를 bitmask (2진수 정수) 형태로 반환한다.
         각 bitmask는 원래 dice 리스트의 인덱스 순서대로 '1'(유지) 또는 '0'(버림)을 나타낸다.
@@ -147,6 +153,23 @@ class Roll:
             if num not in outcome:
                 return 0
         k = Roll.NUMBER_OF_DICE - len(nums_to_keep)
+        target = sorted([x for x in outcome if x not in nums_to_keep])
+        
+            
+        return 1/(6**k)*Roll.count_sorted_permutations(target)
+    
+    
+    @staticmethod
+    def transition_prob_static(r: np.ndarray,keep_mask : int, outcome : np.ndarray):
+        nums_to_keep = []
+        for i, num in enumerate(f"{keep_mask:05b}"):
+            if i == '1':
+                nums_to_keep.append(r[num])
+                
+        for num in nums_to_keep:
+            if num not in outcome:
+                return 0
+        k = Roll.NUMBER_OF_DICE - len(nums_to_keep)
         return 1/(6**k)
         
     @staticmethod
@@ -156,10 +179,27 @@ class Roll:
             occurence[i-1] += 1
         return occurence
 
-
+    @staticmethod
+    def choose_by_keepmask(dice : np.ndarray, keep_mask : int):
+        nums_to_choose=[]
+        for i, num in enumerate(f"{keep_mask:05b}"):
+            if i != '1':
+                nums_to_choose.append(dice[num])
+        nums_to_choose.sort()
+        return tuple(nums_to_choose)
     
     @staticmethod
-    def get_keep_choices_bitmask_from_list(dice : list):
+    def count_sorted_permutations(lst):
+        count = Counter(lst)
+        total = math.factorial(len(lst))
+        for freq in count.values():
+            total //= math.factorial(freq)
+        return total
+    
+        
+    
+    @staticmethod
+    def get_all_keep_choices_bitmask_from_list(dice : list):
         """
         주어진 주사위 결과에서 중복을 고려하여 고유한 keep 선택지를 bitmask (2진수 정수) 형태로 반환한다.
         각 bitmask는 원래 dice 리스트의 인덱스 순서대로 '1'(유지) 또는 '0'(버림)을 나타낸다.
@@ -210,11 +250,11 @@ class Roll:
 class ScoreCard:
     CATEGORY_LIST = ['1','2','3','4','5','6','CH','FH','3K','4K','SS','LS','YA']
     LENGTH_OF_CATEGORY = len(CATEGORY_LIST)
+    BONUS_THRESHOLD = 63
     
     def __init__(self):
         self.usedC = []
         self.current_scores = np.zeros(self.LENGTH_OF_CATEGORY, dtype = np.int32) # 1D ndarray
-        self.logger = logging.getLogger(self.__class__.__name__)
     
     @staticmethod
     def print_category_names():
@@ -226,7 +266,8 @@ class ScoreCard:
     def get_total_score(self):
         return np.sum(self.current_scores)
     
-    def get_score_for_category(self, dice : Roll , category : int):
+    @staticmethod
+    def get_score_for_category(dice : Roll , category : int):
         """_summary_
 
         Args:
@@ -237,20 +278,27 @@ class ScoreCard:
             _type_: _description_
         """
         if isinstance(category, str):
-            category = self.CATEGORY_LIST.index(category) # if category is string, convert it to integer index
+            category = ScoreCard.CATEGORY_LIST.index(category) # if category is string, convert it to integer index
         if ScoreCard.is_upper_section(category):
             return dice.count_k(category+1) * (category+1)
         elif ScoreCard.is_lower_section(category):
-            if dice.has_four_of_a_kind or dice.has_three_of_a_kind:
+            if ScoreCard.CATEGORY_LIST[category] == 'CH':
                 return np.sum(dice.r)
-            elif dice.has_full_house:
-                return 25
-            elif dice.has_small_straight:
-                return 30
-            elif dice.has_large_straight:
-                return 40
-            elif dice.has_yahtzee:
-                return 50
+            elif ScoreCard.CATEGORY_LIST[category] == 'FH':
+                return 25 if dice.has_full_house() else 0
+            elif ScoreCard.CATEGORY_LIST[category] == '3K':
+                return np.sum(dice.r) if dice.has_three_of_a_kind() else 0
+            elif ScoreCard.CATEGORY_LIST[category] == '4K':
+                return np.sum(dice.r) if dice.has_four_of_a_kind() else 0
+            elif ScoreCard.CATEGORY_LIST[category] == 'SS':
+                return 30 if dice.has_small_straight() else 0
+            elif ScoreCard.CATEGORY_LIST[category] == 'LS':
+                return 40 if dice.has_large_straight() else 0
+            elif ScoreCard.CATEGORY_LIST[category] == 'YA':
+                return 50 if dice.has_yahtzee() else 0
+        else:
+            logger.critical(f"Unconsidered case occured. category = {category}, dice= {dice.r}, Category = {ScoreCard.CATEGORY_LIST[category]}")
+            return 0
 
     def fill_score(self,dice : Roll,category):
         if isinstance(category, str):
@@ -272,6 +320,7 @@ class ScoreCard:
             return str in ['CH','FH','3K','4K','SS','LS','YA']
         else:
             return category in [6,7,8,9,10,11,12]
+        
     
 
 class YahtzeeEnvDP(ScoreCard, Roll):
