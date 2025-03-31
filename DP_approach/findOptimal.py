@@ -154,11 +154,12 @@ def update_expectation_end_of_turn(expectation, C, m, f, r):
     referencing the next-state's E-value.
     """
     if len(C) == len(ScoreCard.CATEGORY_LIST):
+        logger.critical(f"code is not supposed to be here. (C,m,f) = {C,m,f}, r= {r}")
         # All categories used → final
         if m >= ScoreCard.BONUS_THRESHOLD:
-            expectation[(C,m,f)][tuple([0 for _ in range(Roll.NUMBER_OF_DICE)])][3] = 35
+            expectation[(C,m,f)][Roll.ALL_DICE_STATES[0]][3] = 35
         else:
-            expectation[(C,m,f)][tuple([0 for _ in range(Roll.NUMBER_OF_DICE)])][3] = 0
+            expectation[(C,m,f)][Roll.ALL_DICE_STATES[0]][3] = 0
         return
 
     # Otherwise, pick best category
@@ -179,6 +180,9 @@ def update_expectation_end_of_turn(expectation, C, m, f, r):
         # Then add the expected value E(S') where S' = (C_next, updated_m, f)
         # But you have to check if cat is an upper category
         new_m = m + points_here if ScoreCard.is_upper_section(cat) else m
+        new_m = min(new_m, ScoreCard.BONUS_THRESHOLD)  # cap at bonus threshold
+        # We need to check if we have already computed E[(C_next, new_m, newf)][r][0] or not.
+        
         # E(S') means "start of next turn" → we typically store that in something like E(S') = ...
         # For now, let's assume we store *turn-level* expectation as well
         # or we re-use E[(C_next, new_m, f)][anything][some_n].
@@ -187,7 +191,7 @@ def update_expectation_end_of_turn(expectation, C, m, f, r):
         # We'll define a helper function or we keep E_start in a separate dict.
 
         # Example: if you store "start-of-turn" in E_start:
-        next_val = expectation[(C_next, new_m, newf)][tuple([0 for _ in range(Roll.NUMBER_OF_DICE)])][3]  # ensure it's computed
+        next_val = expectation[(C_next, new_m, newf)][Roll.ALL_DICE_STATES[0]][3]  # ensure it's computed
         try:
             candidates_val.append(points_here + next_val)
         except TypeError:
@@ -200,6 +204,8 @@ def update_expectation_end_of_turn(expectation, C, m, f, r):
     best_val = max(candidates_val) if candidates_val else 0
     best_cat = candidates_cat[np.argmax(candidates_val)] if candidates_val else None
     expectation[(C,m,f)][tuple(r)][0] = best_val
+    if np.sum(r) == 15 and best_val > 0:
+        logger.debug(f"expectation for end of turn point. exit point of widget, expectation: {best_val}, (C,m,f) = {C,m,f}, r= {r}, n=0")
     return best_cat
 
 def update_expectation_reroll_stage(expectation, C, m, f, r, n):
@@ -217,23 +223,16 @@ def update_expectation_reroll_stage(expectation, C, m, f, r, n):
             val_outcome = expectation[(C,m,f)][outcome][n-1]
             val += p * val_outcome
 
-            # 2) track the best among subrolls
-            if val > best_val:
-                best_val = val
-                best_subroll = keepmask
+        # 2) track the best among subrolls
+        if val > best_val:
+            best_val = val
+            best_subroll = keepmask
 
     # store result
     expectation[(C,m,f)][tuple(r)][n] = best_val
+    if np.sum(r) == 15 and best_subroll > 0 and best_val > 0:
+        logger.debug(f"expectation: {best_val}, (C,m,f) = {C,m,f}, r= {r}, n={n}, keep choice roll = {best_subroll}")
     return best_subroll
-
-def initialize_expectation(expectation, m, f):
-    C = tuple(range(1, len(ScoreCard.CATEGORY_LIST) + 1))
-    for r in Roll.ALL_DICE_STATES:
-        # no matter what r is, C is full. So bonus point is the only reward available.
-        if m >= ScoreCard.BONUS_THRESHOLD:
-            expectation[(C,m,f)][r][0] = 35
-        else:
-            expectation[(C,m,f)][r][0] = 0
     
 
 def fill_dp_table(processed = None, total = None, start_time = None):
@@ -247,14 +246,20 @@ def fill_dp_table(processed = None, total = None, start_time = None):
     valid_Cm_pair = find_valid_Cm_pair()  # or load from file
     # Sort from largest subset to smallest
     valid_Cm_pair_sorted = sorted(valid_Cm_pair, key=lambda x: len(x[0]), reverse=True)
+    logger.debug(f"length of valid_Cm_pair_sorted: {len(valid_Cm_pair_sorted)}")
 
-    # We'll assume f only has two possibilities: [False, True]
-    # If you always do f=False for now, that's fine. 
-    # If you do handle it, also loop f in [False, True].
     
     for (C, m) in valid_Cm_pair_sorted:
             f = False
             S = (C, m, f)
+            
+            if len(C) == len(ScoreCard.CATEGORY_LIST):
+                # All categories used → final
+                if m >= ScoreCard.BONUS_THRESHOLD:
+                    expectation[S][Roll.ALL_DICE_STATES[0]][3] = 35
+                else:
+                    expectation[S][Roll.ALL_DICE_STATES[0]][3] = 0
+                continue
 
             #
             # (A) Compute E_start[S] = sum_{all first-roll r} P(r)* E(S,r,2).
@@ -297,9 +302,10 @@ def fill_dp_table(processed = None, total = None, start_time = None):
             for r in Roll.ALL_DICE_STATES[1:]:
                 p_r = Roll.transition_prob_static([0,0,0,0,0],0,r)
                 val += p_r * expectation[S][r][2]
-            expectation[S][tuple([0 for _ in range(Roll.NUMBER_OF_DICE)])][3] = val
+            expectation[S][Roll.ALL_DICE_STATES[0]][3] = val
             
             processed += 1
+            logger.debug(f"one widget was done. S = (C,m,f) = {C,m,f}")
 
     # done filling everything
     return expectation
